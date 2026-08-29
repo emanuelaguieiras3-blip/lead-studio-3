@@ -76,6 +76,8 @@ const creativeDirections = [
   { id: 'local', name: 'Presença local', kind: 'Proximidade e confiança', color: '#d39a72', reason: 'Localização, relevância regional e dados públicos no centro da copy.' },
 ];
 
+const LEADS_PER_PAGE = 8;
+
 function getProfessionSpecificStrategy(profession: Profession) {
   const key = profession.id.toLowerCase();
   const strategies: Record<string, string> = {
@@ -184,6 +186,7 @@ export default function Home() {
   const [city, setCity] = useState('São Paulo');
   const [minReviews, setMinReviews] = useState('30');
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadPage, setLeadPage] = useState(1);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [loadingCities, setLoadingCities] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -200,6 +203,14 @@ export default function Home() {
   const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
   const profession = useMemo(() => professions.find((item) => item.id === professionId) ?? professions[0], [professionId]);
   const activePrompt = generatedBrief || 'Selecione uma oportunidade real para gerar um prompt exclusivo com gatilhos mentais.';
+  const totalLeadPages = Math.max(1, Math.ceil(leads.length / LEADS_PER_PAGE));
+  const currentLeadPage = Math.min(leadPage, totalLeadPages);
+  const paginatedLeads = useMemo(
+    () => leads.slice((currentLeadPage - 1) * LEADS_PER_PAGE, currentLeadPage * LEADS_PER_PAGE),
+    [currentLeadPage, leads],
+  );
+  const firstVisibleLead = leads.length ? (currentLeadPage - 1) * LEADS_PER_PAGE + 1 : 0;
+  const lastVisibleLead = Math.min(currentLeadPage * LEADS_PER_PAGE, leads.length);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -218,6 +229,7 @@ export default function Home() {
     setCopied(false);
     setGeneratedBrief('');
     setLeads([]);
+    setLeadPage(1);
     setSelectedLead(null);
     setVariation(0);
     if (message) setNotice(message);
@@ -240,12 +252,14 @@ export default function Home() {
       }
       const nextLeads = data.leads ?? [];
       setLeads(nextLeads);
+      setLeadPage(1);
       setSelectedLead(null);
       setGeneratedBrief('');
       setMode(data.mode ?? 'idle');
       setNotice(data.notice || 'Busca concluída.');
     } catch (error) {
       setLeads([]);
+      setLeadPage(1);
       setSelectedLead(null);
       setNotice(error instanceof Error ? error.message : 'Não foi possível pesquisar.');
     } finally {
@@ -299,6 +313,13 @@ export default function Home() {
     setGeneratedBrief('');
     setVariation(0);
     await generateIntegratedPrompt(activeDirection, lead, 0);
+  }
+
+  function goToLeadPage(page: number) {
+    setLeadPage(Math.max(1, Math.min(totalLeadPages, page)));
+    window.requestAnimationFrame(() => {
+      document.getElementById('oportunidades')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
 
   async function regenerateVariation() {
@@ -420,15 +441,37 @@ export default function Home() {
                 <div className="empty-state"><div>⌁</div><b>Seu radar está pronto</b><p>Escolha os filtros e inicie uma busca.</p></div>
               )}
               {searching && <div className="empty-state"><div className="spinner" /><b>Buscando oportunidades</b><p>Verificando reputação e presença digital.</p></div>}
-              {!searching && leads.map((lead, index) => (
+              {!searching && paginatedLeads.map((lead, index) => (
                 <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => void selectOpportunity(lead)}>
-                  <span className="rank-number">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="rank-number">{String((currentLeadPage - 1) * LEADS_PER_PAGE + index + 1).padStart(2, '0')}</span>
                   <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">{lead.phone ? `☎ ${lead.phone}` : 'Contato não informado na fonte'}</small><i>SEM SITE INFORMADO</i></span>
                   <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>{lead.source === 'google' ? 'Google Places' : 'OpenStreetMap'}</small></>}</span>
                   <span className="select-arrow">›</span>
                 </button>
               ))}
             </div>
+            {!searching && leads.length > 0 && (
+              <nav className="lead-pagination" aria-label="Paginação das oportunidades">
+                <p><b>{firstVisibleLead}–{lastVisibleLead}</b> de {leads.length} oportunidades</p>
+                <div className="pagination-controls">
+                  <button type="button" onClick={() => goToLeadPage(currentLeadPage - 1)} disabled={currentLeadPage === 1} aria-label="Página anterior">←</button>
+                  {Array.from({ length: totalLeadPages }, (_, index) => index + 1).map((page) => (
+                    <button
+                      type="button"
+                      key={page}
+                      className={page === currentLeadPage ? 'active' : ''}
+                      onClick={() => goToLeadPage(page)}
+                      aria-label={`Ir para a página ${page}`}
+                      aria-current={page === currentLeadPage ? 'page' : undefined}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button type="button" onClick={() => goToLeadPage(currentLeadPage + 1)} disabled={currentLeadPage === totalLeadPages} aria-label="Próxima página">→</button>
+                </div>
+                <span>Página {currentLeadPage} de {totalLeadPages}</span>
+              </nav>
+            )}
             {selectedLead && (
               <div className="contact-bar">
                 <span><small>{selectedLead.phone ? 'TELEFONE PÚBLICO' : 'FONTE PÚBLICA'}</small><b>{selectedLead.phone || (selectedLead.source === 'google' ? 'Google Places' : 'OpenStreetMap')}</b></span>
