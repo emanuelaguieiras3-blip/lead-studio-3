@@ -1,0 +1,16 @@
+﻿{
+  "chat.promptFilesLocations": [".vscode/prompts", ".github/prompts"],
+  "chat.codeGenerationPromptLocation": ".vscode/prompts/codex-generate-aether1.prompt.md",
+  "chat.instructions": {
+    "workspace": [
+      { "file": ".vscode/prompts/aether1-mode.prompt.md" }
+    ]
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "files.exclude": {
+    "**/.next": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/tsconfig.tsbuildinfo": true
+  }
+}

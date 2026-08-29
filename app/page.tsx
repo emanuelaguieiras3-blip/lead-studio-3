@@ -27,7 +27,7 @@ type SearchApiResponse = {
 
 type AppMode = 'idle' | 'blocked' | 'google' | 'openstreetmap';
 
-type GenerateApiResponse = { prompt?: string; notice?: string; mode?: string; error?: string };
+type GenerateApiResponse = { prompt?: string; proposal?: string; notice?: string; mode?: string; error?: string };
 
 const states: StateOption[] = [
   { id: 12, sigla: 'AC', nome: 'Acre' }, { id: 27, sigla: 'AL', nome: 'Alagoas' },
@@ -197,6 +197,7 @@ export default function Home() {
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [activeDirection, setActiveDirection] = useState('cinematic');
   const [variation, setVariation] = useState(0);
+  const [aiProvider, setAiProvider] = useState<'openai' | 'claude' | 'gemini'>('claude');
   const [generatedBrief, setGeneratedBrief] = useState('');
   const generationRequest = useRef(0);
 
@@ -287,13 +288,14 @@ export default function Home() {
           state: state.sigla,
           lead,
           direction,
+          provider: aiProvider,
           variation: variationOverride,
         }),
       });
-      const data = (await response.json()) as GenerateApiResponse;
-      if (!response.ok || !data.prompt) throw new Error(data.error || 'Não foi possível gerar o texto.');
+      const data = (await response.json()) as GenerateApiResponse & { proposal?: string };
+      if (!response.ok || !(data.prompt || data.proposal)) throw new Error(data.error || 'Não foi possível gerar o texto.');
       if (generationRequest.current !== requestId) return '';
-      const nextPrompt = data.prompt;
+      const nextPrompt = data.proposal || data.prompt || '';
       setGeneratedBrief(nextPrompt);
       setNotice(data.notice || `Texto exclusivo criado para ${lead.name}.`);
       return nextPrompt;
@@ -503,6 +505,23 @@ export default function Home() {
                   <span className="ai-score">↗</span>
                 </button>
               ))}
+            </div>
+
+            <div className="provider-control" style={{ marginTop: 16 }}>
+              <label className="field-label">PROVEDOR DE IA</label>
+              <div className="profession-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                {(['claude', 'gemini', 'openai'] as const).map((provider) => (
+                  <button
+                    key={provider}
+                    type="button"
+                    className={aiProvider === provider ? 'profession active' : 'profession'}
+                    onClick={() => setAiProvider(provider)}
+                  >
+                    <span>{provider === 'claude' ? 'C' : provider === 'gemini' ? 'G' : 'O'}</span>
+                    {provider === 'claude' ? 'Claude IA' : provider === 'gemini' ? 'Gemini IA' : 'OpenAI'}
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 

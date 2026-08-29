@@ -1,0 +1,9 @@
+﻿{
+  "recommendations": [
+    "openai.chatgpt",
+    "anthropic.claude-code",
+    "meteorstudio.cursorcode",
+    "diegosouzapw.omnicopilot",
+    "ritwickdey.liveserver"
+  ]
+}

@@ -13,6 +13,8 @@ type LeadInput = {
   reviewCount: number | null;
 };
 
+type Provider = 'openai' | 'claude' | 'gemini';
+
 const SEGMENT_CONTEXT: Record<string, { desire: string; action: string; proof: string; imagery: string }> = {
   barbearia: { desire: 'identidade, precisão e ritual de cuidado', action: 'agendar um horário', proof: 'acabamento, consistência e experiência', imagery: 'retratos fechados, metal escovado, couro e luz recortada' },
   imobiliária: { desire: 'segurança para decidir e visão de futuro', action: 'solicitar atendimento', proof: 'conhecimento local, curadoria e clareza', imagery: 'arquitetura, luz natural, mapas e enquadramentos amplos' },
@@ -58,6 +60,34 @@ function hash(value: string) {
     result = Math.imul(result, 16777619);
   }
   return Math.abs(result >>> 0);
+}
+
+function buildProposalText(profile: Record<string, string>, lead: LeadInput, directionKey: string, variation: number) {
+  const direction = CREATIVE_DIRECTIONS[directionKey] ?? CREATIVE_DIRECTIONS.cinematic;
+  const segment = profile.segment || 'negócio local';
+  const city = profile.city || 'sua cidade';
+  const state = profile.state || 'SP';
+  const leadName = lead.name || 'empresa local';
+  const leadAddress = lead.address || `${city}/${state}`;
+  const contactLine = lead.phone ? `Contato principal: ${lead.phone}.` : 'Contato público não informado na fonte consultada.';
+  const sourceLabel = lead.source === 'google' ? 'Google Places' : 'OpenStreetMap';
+  const ratingLine = lead.rating !== null && lead.reviewCount !== null
+    ? `Há ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas com média de ${lead.rating.toFixed(1)} estrelas.`
+    : 'Não há nota pública confiável disponível na fonte consultada.';
+
+  return `Proposta para ${leadName}
+
+Tema: ${segment} em ${city}/${state}
+Direção criativa: ${direction.label}
+Variação: ${variation + 1}
+
+Olá, meu objetivo é criar uma presença digital premium para ${leadName}, localizado em ${leadAddress}. A proposta é desenvolver uma landing page com linguagem clara, narrativa local e foco em conversão, com elementos de identidade premium e uma experiência mais sofisticada para clientes reais da região.
+
+A página será pensada para comunicar confiança, profissionalismo e valorização do serviço prestado, respeitando os dados públicos disponíveis no cadastro consultado: ${sourceLabel}. ${ratingLine} ${contactLine}
+
+A estrutura será pensada para atrair e converter: abertura forte, reforço da proposta de valor, prova e contexto local, seções de diferenciais, prova social, formas de contato e CTA claro. A comunicação será em português do Brasil, com tom profissional, acolhedor e persuasivo, sem inventar informações que não estejam respaldadas pela fonte.
+
+O resultado esperado é uma página mais memorável, bem posicionada no mercado local e capaz de gerar mais contato, confiança e conversão para o negócio. A proposta segue com foco em clareza, presença local e linguagem premium, sem exageros ou promessas não verificadas.`;
 }
 
 function buildOpportunityPrompt(profile: Record<string, string>, lead: LeadInput, directionKey: string, variation: number) {
@@ -171,6 +201,81 @@ function extractResponseText(result: { output_text?: string; output?: Array<{ co
   return result.output?.flatMap((item) => item.content ?? []).map((item) => item.text ?? '').join('\n').trim() ?? '';
 }
 
+async function callOpenAI(prompt: string) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_MODEL || 'gpt-5.4-mini';
+  if (!apiKey) return null;
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      max_output_tokens: 2600,
+      instructions: 'Você é um estrategista de proposta e marketing local. Gere um texto de proposta profissional em português do Brasil, com foco em clareza, valor percebido e fechamento ético. Nunca invente dados.',
+      input: prompt,
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+
+  if (!response.ok) return null;
+  const data = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
+  return extractResponseText(data);
+}
+
+async function callClaude(prompt: string) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const model = process.env.ANTHROPIC_MODEL || 'claude-3-7-sonnet-latest';
+  if (!apiKey) return null;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2200,
+      system: 'Você é um estrategista de proposta e marketing local. Gere um texto profissional em português do Brasil, com foco em clareza, valor percebido, contexto local e fechamento ético. Nunca invente dados. Responda em texto corrido, sem listas vazias.',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+
+  if (!response.ok) return null;
+  const data = await response.json() as { content?: Array<{ text?: string }> };
+  return data.content?.map((item) => item.text ?? '').join('\n').trim() ?? '';
+}
+
+async function callGemini(prompt: string) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  if (!apiKey) return null;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2200 },
+      system_instruction: {
+        parts: [{ text: 'Você é um estrategista de proposta e marketing local. Gere um texto profissional em português do Brasil, claro, persuasivo e ético. Nunca invente dados. Responda em texto bem estruturado.' }],
+      },
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+
+  if (!response.ok) return null;
+  const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  return data.candidates?.flatMap((candidate) => candidate.content?.parts ?? []).map((part) => part.text ?? '').join('\n').trim() ?? '';
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown> | null;
@@ -181,37 +286,53 @@ export async function POST(request: NextRequest) {
       mapsUrl: clean(rawLead.mapsUrl), source: rawLead.source === 'google' ? 'google' : 'openstreetmap',
       rating: cleanNumber(rawLead.rating), reviewCount: cleanNumber(rawLead.reviewCount),
     };
+
     const direction = clean(body?.direction || 'cinematic').toLowerCase();
     const variation = Math.max(0, Math.min(99, Number(body?.variation) || 0));
+    const provider = (String(body?.provider || 'claude').toLowerCase() as Provider);
 
     if (!profile.segment || !profile.city || !profile.state || !lead.id || !lead.name) {
       return NextResponse.json({ error: 'Selecione uma oportunidade real antes de gerar o texto.' }, { status: 400 });
     }
 
     const sourcePrompt = buildOpportunityPrompt(profile, lead, direction, variation);
-    const apiKey = process.env.OPENAI_API_KEY;
-    const model = process.env.OPENAI_MODEL;
-    if (!apiKey || !model) {
-      return NextResponse.json({ prompt: sourcePrompt, mode: 'local', notice: 'Brief exclusivo gerado com os dados reais da oportunidade.' });
+    const baseProposal = buildProposalText(profile, lead, direction, variation);
+    const proposalPrompt = `Crie uma proposta comercial profissional para ${lead.name}, setor ${profile.segment}, cidade ${profile.city}/${profile.state}. Baseie-se apenas nos dados disponíveis: nome, endereço, telefone, fonte pública, avaliação se existir. A proposta deve ser em português do Brasil, com tom profissional e persuasivo, sem inventar informações.\n\nDados:\n- Nome: ${lead.name}\n- Endereço: ${lead.address || `${profile.city}/${profile.state}`}\n- Telefone: ${lead.phone || 'não informado'}\n- Fonte: ${lead.source === 'google' ? 'Google Places' : 'OpenStreetMap'}\n- Avaliação: ${lead.rating !== null && lead.reviewCount !== null ? `${lead.rating.toFixed(1)} em ${lead.reviewCount.toLocaleString('pt-BR')} avaliações` : 'não disponível'}\n\nEscreva uma proposta de 3 a 5 parágrafos, com apresentação do negócio, contexto local, diferenciais éticos, valor percebido e CTA.`;
+
+    let generatedText = '';
+    let activeProvider: Provider = provider;
+
+    if (provider === 'openai') {
+      generatedText = (await callOpenAI(proposalPrompt)) || '';
+    } else if (provider === 'claude') {
+      generatedText = (await callClaude(proposalPrompt)) || '';
+    } else if (provider === 'gemini') {
+      generatedText = (await callGemini(proposalPrompt)) || '';
     }
 
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model, store: false, max_output_tokens: 2600,
-        instructions: 'Você é um diretor criativo sênior e estrategista de conversão. Reescreva o brief recebido como um prompt de produção único, específico e executável. Preserve todos os dados verificados exatamente. Use gatilhos mentais éticos, nunca invente provas, serviços, urgência ou atributos da empresa. Não copie Aether 1; trate-o apenas como referência de ambição narrativa e acabamento. Responda somente com o prompt final em Markdown, em português do Brasil.',
-        input: sourcePrompt,
-      }),
-      signal: AbortSignal.timeout(45_000),
+    if (!generatedText) {
+      const fallbackProviderOrder: Provider[] = ['claude', 'gemini', 'openai'];
+      for (const fallbackProvider of fallbackProviderOrder) {
+        if (fallbackProvider === provider) continue;
+        const text = fallbackProvider === 'claude' ? await callClaude(proposalPrompt) : fallbackProvider === 'gemini' ? await callGemini(proposalPrompt) : await callOpenAI(proposalPrompt);
+        if (text) {
+          generatedText = text;
+          activeProvider = fallbackProvider;
+          break;
+        }
+      }
+    }
+
+    const finalText = generatedText || baseProposal;
+
+    return NextResponse.json({
+      prompt: sourcePrompt,
+      proposal: finalText,
+      mode: generatedText ? activeProvider : 'local',
+      notice: generatedText
+        ? `Texto exclusivo de proposta criado para ${lead.name} via ${activeProvider.toUpperCase()}.`
+        : 'Os provedores de IA estão indisponíveis; a proposta foi criada localmente com dados reais da oportunidade.',
     });
-    const result = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }>; error?: { message?: string } };
-    const generated = extractResponseText(result);
-    if (!response.ok || !generated) {
-      return NextResponse.json({ prompt: sourcePrompt, mode: 'local', notice: 'A IA ficou indisponível; o brief exclusivo foi gerado pelo motor seguro do site.' });
-    }
-
-    return NextResponse.json({ prompt: generated, mode: 'openai', notice: `Texto exclusivo criado para ${lead.name}, com gatilhos éticos e dados verificados.` });
   } catch {
     return NextResponse.json({ error: 'Não foi possível gerar o texto desta oportunidade.' }, { status: 500 });
   }
