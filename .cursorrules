@@ -1,0 +1,44 @@
+# Cursor project rules
+
+## Projeto
+Aplicação **Lead Studio** em Next.js 16 para buscar oportunidades locais (empresas sem site) e gerar prompts premium com gatilhos mentais éticos para criação de landing pages.
+
+## Stack
+- Next.js 16 + React 19 + TypeScript (strict)
+- Tailwind CSS 4
+- Vite 8 (build complementar)
+- Deploy: Vercel (automático via GitHub)
+
+## Regras
+- Mantenha a stack atual: Next.js 16 + React 19 + TypeScript.
+- Sempre escreva em português do Brasil.
+- Não invente dados reais de negócios, avaliações, telefone ou endereço.
+- Preserve a aparência premium, limpa e responsiva da interface.
+- Priorize a qualidade de busca e a clareza da experiência de uso.
+- Valide mudanças com build e lint quando apropriado.
+
+## Segurança
+- NUNCA commite chaves, tokens ou secrets no código.
+- Variáveis sensíveis ficam SOMENTE no `.env.local` (protegido pelo `.gitignore`).
+- Use `secureJson()` para respostas de API com headers de segurança.
+- Valide origens com `isTrustedOrigin()` em rotas sensíveis.
+- Sanitize inputs com `cleanText()` antes de usar em queries externas.
+
+## Pontos sensíveis
+- app/api/leads/route.ts — busca de leads (Google Places + OpenStreetMap)
+- app/api/generate/route.ts — geração de prompts premium
+- app/api/github/route.ts — consulta de repositórios GitHub
+- app/page.tsx — interface principal
+- tests/lead-search.test.ts — testes do fluxo de busca
+
+## Variáveis de ambiente
+- OPENAI_API_KEY, OPENAI_MODEL — geração de prompts
+- GOOGLE_PLACES_API_KEY_1..5 — busca de leads
+- GITHUB_TOKEN — API do GitHub (rate limit)
+- NEXT_PUBLIC_SITE_URL — URL pública para CORS
+
+## Padrões de código
+- Tipos explícitos para todas as funções e parâmetros.
+- Prefer `const` e funções nomeadas.
+- Tratamento de erros com try/catch e respostas adequadas.
+- Timeouts em todas as chamadas externas (`AbortSignal.timeout`).

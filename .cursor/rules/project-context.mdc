@@ -1,0 +1,46 @@
+---
+description: Contexto do projeto Leads para o Cursor
+alwaysApply: true
+---
+
+# Lead Studio
+
+## Objetivo
+Aplicação para buscar leads locais (empresas sem site informado) e gerar prompts premium com gatilhos mentais éticos para criação de landing pages.
+
+## Stack
+- Next.js 16 + App Router
+- React 19
+- TypeScript (strict)
+- Tailwind CSS 4
+- Vite 8 (build complementar)
+- Deploy: Vercel (automático via GitHub)
+
+## Regras gerais
+- Use português do Brasil em interface, nomes e comentários.
+- Não invente dados de empresas, contatos, avaliações ou endereço.
+- Preserve a estética premium e a clareza UX.
+- Mantenha o sistema robusto em busca e geração de prompts.
+
+## Segurança
+- NUNCA commite chaves, tokens ou secrets.
+- `.env.local` está no `.gitignore` — jamais commitar.
+- Use `secureJson()` em respostas de API.
+- Valide origens e sanitize inputs.
+
+## Arquivos importantes
+- app/page.tsx — interface principal
+- app/api/leads/route.ts — busca de leads (Google Places + OSM)
+- app/api/generate/route.ts — geração de prompts premium
+- app/api/github/route.ts — consulta de repositórios GitHub
+- tests/lead-search.test.ts — testes do fluxo de busca
+
+## Variáveis de ambiente
+- OPENAI_API_KEY / OPENAI_MODEL — geração de prompts
+- GOOGLE_PLACES_API_KEY_1..5 — busca de leads
+- GITHUB_TOKEN — API do GitHub
+- NEXT_PUBLIC_SITE_URL — URL pública para CORS
+
+## Validação
+- Execute `npm run build` quando ajustar componentes, rotas ou lógica de busca.
+- Execute `npm run lint` quando alterar código reutilizável ou arquivos do app.
