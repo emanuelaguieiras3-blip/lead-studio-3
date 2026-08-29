@@ -14,7 +14,7 @@ type Lead = {
   phone: string;
   website: null;
   mapsUrl: string;
-  source: 'google' | 'demo';
+  source: 'google';
 };
 
 const states: StateOption[] = [
@@ -99,8 +99,8 @@ export default function Home() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [loadingCities, setLoadingCities] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [notice, setNotice] = useState('Faça uma busca para encontrar oportunidades.');
-  const [mode, setMode] = useState<'idle' | 'demo' | 'google'>('idle');
+  const [notice, setNotice] = useState('Os resultados serão consultados diretamente no Google Places.');
+  const [mode, setMode] = useState<'idle' | 'blocked' | 'google'>('idle');
   const [copied, setCopied] = useState(false);
 
   const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
@@ -136,7 +136,10 @@ export default function Home() {
         body: JSON.stringify({ profession: profession.label, city, state: state.nome, minReviews: Number(minReviews) }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível pesquisar.');
+      if (!response.ok) {
+        setMode(data.code === 'GOOGLE_PLACES_NOT_CONFIGURED' ? 'blocked' : 'idle');
+        throw new Error(data.error || 'Não foi possível pesquisar.');
+      }
       setLeads(data.leads);
       setSelectedLead(data.leads[0] ?? null);
       setMode(data.mode);
@@ -184,7 +187,7 @@ export default function Home() {
             <span className="kicker">PROSPECÇÃO + CRIAÇÃO</span>
             <h2>Encontre o negócio certo.<br /><em>Crie o site perfeito.</em></h2>
           </div>
-          <p>Selecione uma profissão e uma cidade. O radar prioriza empresas sem site com muitas avaliações e prepara o prompt para a melhor IA.</p>
+          <p>Selecione uma profissão e uma cidade. O radar consulta empresas reais no Google, filtra quem não informa site e prepara o prompt para a melhor IA.</p>
         </section>
 
         <div className="dashboard-grid">
@@ -221,9 +224,9 @@ export default function Home() {
               </select>
             </label>
 
-            <div className="locked-filter"><span>✓</span><div><b>Somente negócios sem site</b><small>Filtro obrigatório para oportunidades reais</small></div><i>ATIVO</i></div>
+            <div className="locked-filter"><span>✓</span><div><b>Somente negócios reais sem site</b><small>Dados oficiais do Google Places</small></div><i>ATIVO</i></div>
             <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
-            <p className="data-note">{mode === 'demo' && <b>MODO DEMONSTRAÇÃO · </b>}{notice}</p>
+            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{mode === 'google' && <b>DADOS REAIS · </b>}{notice}</p>
           </section>
 
           <section className="leads-panel">

@@ -9,40 +9,76 @@ type GooglePlace = {
   websiteUri?: string;
   nationalPhoneNumber?: string;
   googleMapsUri?: string;
+  businessStatus?: string;
 };
 
-const DEMO_NAMES: Record<string, string[]> = {
-  barbearia: ['Barbearia Imperial', 'Corte Nobre', 'Estação do Barbeiro', 'Barba & Brasa', 'Oficina do Corte', 'Clube 27'],
-  imobiliaria: ['Morada Prime Imóveis', 'Horizonte Imobiliária', 'Viva Lar Negócios', 'Chave Certa Imóveis', 'Ponto Alto Imobiliária', 'Casa Nova Consultoria'],
-  estetica: ['Studio Lumi', 'Essenza Estética', 'Aura Clínica', 'Pele & Arte', 'Maison Belle', 'Vitta Estética'],
-  odontologia: ['Sorriso Prime', 'Odonto Vitta', 'Clínica Oralis', 'Sorriso Leve', 'Dental Care', 'Odonto Essencial'],
-};
+type GoogleResponse = { places?: GooglePlace[]; nextPageToken?: string };
+
+const requestWindows = new Map<string, { startedAt: number; count: number }>();
+const WINDOW_MS = 60_000;
+const MAX_REQUESTS_PER_WINDOW = 12;
 
 function text(value: unknown, max = 120) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
-function demoLeads(profession: string, city: string, state: string, minReviews: number) {
-  const key = Object.keys(DEMO_NAMES).find((item) => profession.toLowerCase().includes(item));
-  const names = key ? DEMO_NAMES[key] : [
-    `${profession} Referência`, `${profession} Central`, `Espaço ${profession}`, `${profession} Prime`, `Studio ${profession}`, `${profession} & Co.`,
-  ];
-  const base = Math.max(minReviews, 80);
-  return names.map((name, index) => ({
-    id: `demo-${index + 1}`,
-    name,
-    rating: Number(Math.max(4.3, 4.9 - index * 0.1).toFixed(1)),
-    reviewCount: base + [684, 447, 298, 176, 94, 37][index],
-    address: `${city}, ${state}`,
-    phone: '',
-    website: null,
-    mapsUrl: '',
-    source: 'demo' as const,
-  })).sort((a, b) => b.reviewCount - a.reviewCount || b.rating - a.rating);
+function isRateLimited(request: NextRequest) {
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  const key = forwarded || request.headers.get('cf-connecting-ip') || 'anonymous';
+  const now = Date.now();
+  const current = requestWindows.get(key);
+  if (!current || now - current.startedAt >= WINDOW_MS) {
+    requestWindows.set(key, { startedAt: now, count: 1 });
+    return false;
+  }
+  current.count += 1;
+  return current.count > MAX_REQUESTS_PER_WINDOW;
+}
+
+async function fetchPlaces(apiKey: string, query: string) {
+  const places: GooglePlace[] = [];
+  let pageToken = '';
+
+  for (let page = 0; page < 3; page += 1) {
+    const body: Record<string, unknown> = {
+      textQuery: query,
+      languageCode: 'pt-BR',
+      regionCode: 'BR',
+      pageSize: 20,
+    };
+    if (pageToken) body.pageToken = pageToken;
+
+    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.websiteUri,places.nationalPhoneNumber,places.googleMapsUri,places.businessStatus,nextPageToken',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error('Google Places error:', response.status, detail.slice(0, 500));
+      throw new Error(`Google Places respondeu com status ${response.status}.`);
+    }
+
+    const payload = await response.json() as GoogleResponse;
+    places.push(...(payload.places ?? []));
+    pageToken = payload.nextPageToken ?? '';
+    if (!pageToken) break;
+  }
+
+  return places;
 }
 
 export async function POST(request: NextRequest) {
   try {
+    if (isRateLimited(request)) {
+      return NextResponse.json({ error: 'Muitas pesquisas em pouco tempo. Aguarde um minuto e tente novamente.' }, { status: 429 });
+    }
+
     const body = await request.json();
     const profession = text(body.profession);
     const city = text(body.city);
@@ -56,42 +92,18 @@ export async function POST(request: NextRequest) {
     const apiKey = process.env.GOOGLE_PLACES_API_KEY;
     if (!apiKey) {
       return NextResponse.json({
-        leads: demoLeads(profession, city, state, minReviews),
-        mode: 'demo',
-        notice: 'Dados de exemplo. Adicione GOOGLE_PLACES_API_KEY para pesquisar empresas reais.',
-      });
+        error: 'A conexão com o Google Places ainda precisa ser ativada pelo proprietário.',
+        code: 'GOOGLE_PLACES_NOT_CONFIGURED',
+      }, { status: 503 });
     }
 
-    const googleResponse = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.websiteUri,places.nationalPhoneNumber,places.googleMapsUri',
-      },
-      body: JSON.stringify({
-        textQuery: `${profession} em ${city}, ${state}, Brasil`,
-        languageCode: 'pt-BR',
-        regionCode: 'BR',
-        pageSize: 20,
-      }),
-    });
-
-    if (!googleResponse.ok) {
-      const detail = await googleResponse.text();
-      console.error('Google Places error:', googleResponse.status, detail.slice(0, 500));
-      return NextResponse.json({
-        leads: demoLeads(profession, city, state, minReviews),
-        mode: 'demo',
-        notice: 'A busca real não respondeu. Exibindo dados de exemplo.',
-      });
-    }
-
-    const payload = await googleResponse.json() as { places?: GooglePlace[] };
-    const leads = (payload.places ?? [])
+    const results = await fetchPlaces(apiKey, `${profession} em ${city}, ${state}, Brasil`);
+    const unique = new Map(results.filter((place) => place.id).map((place) => [place.id as string, place]));
+    const leads = [...unique.values()]
+      .filter((place) => place.businessStatus !== 'CLOSED_PERMANENTLY')
       .filter((place) => !place.websiteUri && (place.userRatingCount ?? 0) >= minReviews)
       .map((place) => ({
-        id: place.id ?? crypto.randomUUID(),
+        id: place.id as string,
         name: place.displayName?.text ?? 'Empresa sem nome',
         rating: place.rating ?? 0,
         reviewCount: place.userRatingCount ?? 0,
@@ -106,10 +118,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       leads,
       mode: 'google',
-      notice: leads.length ? 'Resultados reais: sem site informado no Google e ordenados por avaliações.' : 'Nenhuma empresa sem site atingiu o mínimo de avaliações nesta busca.',
+      notice: leads.length
+        ? `${leads.length} empresas reais sem site informado no Google, ordenadas por avaliações.`
+        : 'Nenhuma empresa real sem site atingiu o mínimo de avaliações nesta busca. Tente diminuir o filtro.',
     });
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: 'Não foi possível concluir a pesquisa.' }, { status: 500 });
+    return NextResponse.json({ error: 'A busca real não respondeu. Tente novamente em alguns instantes.' }, { status: 502 });
   }
 }
