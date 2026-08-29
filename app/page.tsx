@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type StateOption = { id: number; sigla: string; nome: string };
 type CityOption = { id: number; nome: string };
@@ -9,14 +9,25 @@ type Profession = { id: string; label: string; icon: string; style: string; serv
 type Lead = {
   id: string;
   name: string;
-  rating: number;
-  reviewCount: number;
+  rating: number | null;
+  reviewCount: number | null;
   address: string;
   phone: string;
   website: null;
   mapsUrl: string;
-  source: 'google';
+  source: 'google' | 'openstreetmap';
 };
+
+type SearchApiResponse = {
+  leads?: Lead[];
+  mode?: 'idle' | 'blocked' | 'google' | 'openstreetmap';
+  notice?: string;
+  error?: string;
+};
+
+type AppMode = 'idle' | 'blocked' | 'google' | 'openstreetmap';
+
+type GenerateApiResponse = { prompt?: string; notice?: string; mode?: string; error?: string };
 
 const states: StateOption[] = [
   { id: 12, sigla: 'AC', nome: 'Acre' }, { id: 27, sigla: 'AL', nome: 'Alagoas' },
@@ -58,13 +69,11 @@ const professions: Profession[] = [
   { id: 'marketing', label: 'Agência de marketing', icon: '✹', style: 'moderno, estratégico, vibrante, claro e versátil', services: 'posicionamento, tráfego, branding e métricas' },
 ];
 
-const aiRanking = [
-  { rank: 1, name: 'Gemini', kind: 'Brief gerado no site', score: '9.8', color: '#4d8bff', reason: 'Cria o briefing detalhado para o perfil do cliente sem sair do painel.' },
-  { rank: 2, name: 'Codex', kind: 'Implementação e refinamento', score: '9.4', color: '#5ecf8f', reason: 'Ótimo para transformar o prompt em código e arquitetura do site.' },
-  { rank: 3, name: 'Cursor', kind: 'Fluxo de prototipagem', score: '9.2', color: '#b088ff', reason: 'Excelente para iterar no layout, conteúdo e ajustes finais do projeto.' },
-  { rank: 4, name: 'Claude', kind: 'Refino e estratégia', score: '9.1', color: '#d39a72', reason: 'Bom para revisão textual, UX e refinamento do material gerado.' },
-  { rank: 5, name: 'ChatGPT', kind: 'Copy e roteiro', score: '9.0', color: '#6fd1ff', reason: 'Excelente para ajustar headline, copy e estrutura textual da landing page.' },
-  { rank: 6, name: 'OpenAI', kind: 'Versão premium', score: '8.9', color: '#7ee0a4', reason: 'Útil para refinar proposta, CTAs e posicionamento final da marca.' },
+const creativeDirections = [
+  { id: 'cinematic', name: 'Cinematográfica', kind: 'Storytelling imersivo', color: '#4d8bff', reason: 'Grandes momentos visuais, ritmo narrativo e interações com intenção.' },
+  { id: 'editorial', name: 'Editorial', kind: 'Tipografia e composição', color: '#b088ff', reason: 'Uma presença sofisticada, autoral e guiada por conteúdo.' },
+  { id: 'conversion', name: 'Conversão', kind: 'Clareza e persuasão', color: '#5ecf8f', reason: 'Gatilhos éticos, objeções bem tratadas e contato sem fricção.' },
+  { id: 'local', name: 'Presença local', kind: 'Proximidade e confiança', color: '#d39a72', reason: 'Localização, relevância regional e dados públicos no centro da copy.' },
 ];
 
 function getProfessionSpecificStrategy(profession: Profession) {
@@ -95,9 +104,13 @@ function getProfessionSpecificStrategy(profession: Profession) {
   return strategies[key] || `Foque em diferenciais reais do setor, autoridade local, muito clareza e experiência premium para ${profession.label}.`;
 }
 
+// Mantido apenas como referência editorial legada; a geração ativa acontece no servidor.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildPrompt(lead: Lead | null, profession: Profession, city: string, uf: string) {
   const business = lead?.name ?? `uma ${profession.label.toLowerCase()} em ${city}`;
-  const proof = lead ? `${lead.rating.toFixed(1)} estrelas e ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas` : 'boa reputação local';
+  const proof = lead && lead.rating !== null && lead.reviewCount !== null
+    ? `${lead.rating.toFixed(1)} estrelas e ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas`
+    : 'cadastro público real sem nota disponível';
   const contact = lead?.phone ? `Telefone público para contato: ${lead.phone}.` : 'Telefone ainda não informado.';
   const professionStrategy = getProfessionSpecificStrategy(profession);
 
@@ -172,41 +185,43 @@ export default function Home() {
   const [minReviews, setMinReviews] = useState('30');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [loadingCities, setLoadingCities] = useState(false);
+  const [loadingCities, setLoadingCities] = useState(true);
   const [searching, setSearching] = useState(false);
   const [notice, setNotice] = useState('Os resultados serão consultados diretamente no Google Places.');
-  const [mode, setMode] = useState<'idle' | 'blocked' | 'google'>('idle');
+  const [mode, setMode] = useState<AppMode>('idle');
   const [copied, setCopied] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
-  const [activeAi, setActiveAi] = useState('Gemini');
+  const [activeDirection, setActiveDirection] = useState('cinematic');
+  const [variation, setVariation] = useState(0);
   const [generatedBrief, setGeneratedBrief] = useState('');
-  const [promptLabel, setPromptLabel] = useState('Gemini');
+  const generationRequest = useRef(0);
 
   const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
   const profession = useMemo(() => professions.find((item) => item.id === professionId) ?? professions[0], [professionId]);
-  const prompt = useMemo(() => buildPrompt(selectedLead, profession, city, state.sigla), [selectedLead, profession, city, state.sigla]);
-  const activePrompt = generatedBrief || prompt;
+  const activePrompt = generatedBrief || 'Selecione uma oportunidade real para gerar um prompt exclusivo com gatilhos mentais.';
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoadingCities(true);
     fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${stateId}/municipios?orderBy=nome`, { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data: CityOption[]) => {
+      .then((response) => response.json() as Promise<CityOption[]>)
+      .then((data) => {
         setCities(data);
         setCity((current) => data.some((item) => item.nome === current) ? current : (data[0]?.nome ?? ''));
       })
-      .catch((error) => { if (error.name !== 'AbortError') setCities([]); })
+      .catch((error) => { if (error instanceof Error && error.name !== 'AbortError') setCities([]); })
       .finally(() => setLoadingCities(false));
     return () => controller.abort();
   }, [stateId]);
 
-  useEffect(() => {
+  function resetResults(message?: string) {
     setCopied(false);
     setGeneratedBrief('');
-    setPromptLabel('Gemini');
-  }, [professionId, city, stateId]);
+    setLeads([]);
+    setSelectedLead(null);
+    setVariation(0);
+    if (message) setNotice(message);
+  }
 
   async function searchLeads() {
     if (!city) return;
@@ -219,15 +234,16 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ profession: profession.label, city, state: state.nome, minReviews: Number(minReviews) }),
       });
-      const data = await response.json();
+      const data = (await response.json()) as SearchApiResponse;
       if (!response.ok) {
-        setMode(data.code === 'GOOGLE_PLACES_NOT_CONFIGURED' ? 'blocked' : 'idle');
         throw new Error(data.error || 'Não foi possível pesquisar.');
       }
-      setLeads(data.leads);
-      setSelectedLead(data.leads[0] ?? null);
-      setMode(data.mode);
-      setNotice(data.notice);
+      const nextLeads = data.leads ?? [];
+      setLeads(nextLeads);
+      setSelectedLead(null);
+      setGeneratedBrief('');
+      setMode(data.mode ?? 'idle');
+      setNotice(data.notice || 'Busca concluída.');
     } catch (error) {
       setLeads([]);
       setSelectedLead(null);
@@ -237,53 +253,67 @@ export default function Home() {
     }
   }
 
-  async function generateIntegratedPrompt(provider = 'gemini') {
-    const providerLabel = provider === 'gemini' ? 'Gemini' : provider === 'codex' ? 'Codex' : 'Cursor';
+  async function generateIntegratedPrompt(direction = activeDirection, leadOverride?: Lead, variationOverride = variation) {
+    const lead = leadOverride ?? selectedLead;
+    if (!lead) {
+      setNotice('Selecione uma oportunidade real para gerar o texto.');
+      return '';
+    }
+    const requestId = generationRequest.current + 1;
+    generationRequest.current = requestId;
     setGeneratingPrompt(true);
-    setPromptLabel(providerLabel);
-    setNotice(`Gerando um briefing exclusivo com ${providerLabel}...`);
+    setNotice(`Criando uma narrativa exclusiva para ${lead.name}...`);
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          business: selectedLead?.name ?? profession.label,
           segment: profession.label,
-          audience: 'clientes locais que buscam atendimento rápido e confiável',
-          objective: 'aumentar conversas, agendamentos e fechamento',
-          tone: 'elegante',
           city,
-          state: state.nome,
-          leadName: selectedLead?.name,
-          engine: provider,
+          state: state.sigla,
+          lead,
+          direction,
+          variation: variationOverride,
         }),
       });
-      const data = await response.json();
-      const nextPrompt = data.prompt || prompt;
+      const data = (await response.json()) as GenerateApiResponse;
+      if (!response.ok || !data.prompt) throw new Error(data.error || 'Não foi possível gerar o texto.');
+      if (generationRequest.current !== requestId) return '';
+      const nextPrompt = data.prompt;
       setGeneratedBrief(nextPrompt);
-      setNotice(data.notice || `Brief personalizado gerado diretamente no site com ${providerLabel}.`);
-      setMode('google');
+      setNotice(data.notice || `Texto exclusivo criado para ${lead.name}.`);
       return nextPrompt;
     } catch (error) {
-      setGeneratedBrief(prompt);
-      setNotice(error instanceof Error ? error.message : 'Não foi possível gerar o brief.');
-      return prompt;
+      if (generationRequest.current === requestId) {
+        setGeneratedBrief('');
+        setNotice(error instanceof Error ? error.message : 'Não foi possível gerar o brief.');
+      }
+      return '';
     } finally {
-      setGeneratingPrompt(false);
+      if (generationRequest.current === requestId) setGeneratingPrompt(false);
     }
   }
 
-  async function copyPromptFor(target: 'gemini' | 'cursor' | 'codex' = 'gemini') {
-    const label = target === 'gemini' ? 'Gemini' : target === 'cursor' ? 'Cursor' : 'Codex';
-    await navigator.clipboard.writeText(activePrompt);
-    setCopied(true);
-    setPromptLabel(label);
-    setNotice(`Prompt copiado para ${label}. Cole no agente escolhido.`);
-    window.setTimeout(() => setCopied(false), 1800);
+  async function selectOpportunity(lead: Lead) {
+    setSelectedLead(lead);
+    setGeneratedBrief('');
+    setVariation(0);
+    await generateIntegratedPrompt(activeDirection, lead, 0);
+  }
+
+  async function regenerateVariation() {
+    if (!selectedLead) return;
+    const nextVariation = variation + 1;
+    setVariation(nextVariation);
+    await generateIntegratedPrompt(activeDirection, selectedLead, nextVariation);
   }
 
   async function copyPrompt() {
-    await copyPromptFor(promptLabel.toLowerCase() === 'cursor' ? 'cursor' : promptLabel.toLowerCase() === 'codex' ? 'codex' : 'gemini');
+    if (!generatedBrief) return;
+    await navigator.clipboard.writeText(activePrompt);
+    setCopied(true);
+    setNotice('Prompt copiado. Ele está pronto para colar no seu agente de criação.');
+    window.setTimeout(() => setCopied(false), 1800);
   }
 
   async function copyPhone() {
@@ -298,10 +328,10 @@ export default function Home() {
       <aside className="rail">
         <div className="brand-mark" aria-label="Lead Studio">L</div>
         <nav className="rail-nav" aria-label="Navegação principal">
-          <Link href="/dashboard" className="rail-button active" aria-label="Dashboard">⌁</Link>
-          <Link href="/oportunidades" className="rail-button" aria-label="Oportunidades">◎</Link>
-          <Link href="/briefs" className="rail-button" aria-label="Briefs">✦</Link>
-          <Link href="/insights" className="rail-button" aria-label="Insights">□</Link>
+          <Link href="/" className="rail-button active" aria-label="Dashboard">⌁</Link>
+          <Link href="#oportunidades" className="rail-button" aria-label="Oportunidades">◎</Link>
+          <Link href="#brief" className="rail-button" aria-label="Briefs">✦</Link>
+          <Link href="#direcao" className="rail-button" aria-label="Direção criativa">□</Link>
         </nav>
         <div className="rail-status" title="Sistema online"><i /></div>
       </aside>
@@ -341,9 +371,7 @@ export default function Home() {
                   className={professionId === item.id ? 'profession active' : 'profession'}
                   onClick={() => {
                     setProfessionId(item.id);
-                    setGeneratedBrief(buildPrompt(selectedLead, item, city, state.sigla));
-                    setPromptLabel('Gemini');
-                    setNotice(`Prompt personalizado para ${item.label} gerado.`);
+                    resetResults(`Segmento alterado para ${item.label}. Faça uma nova busca para ver negócios reais.`);
                   }}
                 >
                   <span>{item.icon}</span>{item.label}
@@ -353,12 +381,19 @@ export default function Home() {
 
             <div className="location-fields">
               <label>Estado
-                <select value={stateId} onChange={(event) => setStateId(event.target.value)}>
+                <select value={stateId} onChange={(event) => {
+                  setLoadingCities(true);
+                  setStateId(event.target.value);
+                  resetResults('Estado alterado. Escolha a cidade e faça uma nova busca.');
+                }}>
                   {states.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
                 </select>
               </label>
               <label>Cidade
-                <select value={city} onChange={(event) => setCity(event.target.value)} disabled={loadingCities}>
+                <select value={city} onChange={(event) => {
+                  setCity(event.target.value);
+                  resetResults('Cidade alterada. Faça uma nova busca para ver negócios reais.');
+                }} disabled={loadingCities}>
                   {loadingCities && <option>Carregando...</option>}
                   {!loadingCities && cities.map((item) => <option key={item.id} value={item.nome}>{item.nome}</option>)}
                 </select>
@@ -373,82 +408,74 @@ export default function Home() {
               </select>
             </label>
 
-            <div className="locked-filter"><span>✓</span><div><b>Somente negócios reais sem site</b><small>Google Places · chaves protegidas no servidor</small></div><i>ATIVO</i></div>
+            <div className="locked-filter"><span>✓</span><div><b>Somente negócios reais</b><small>Google Places ou OpenStreetMap · sem cadastros fictícios</small></div><i>ATIVO</i></div>
             <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
-            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{mode === 'google' && <b>DADOS REAIS · </b>}{notice}</p>
+            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{(mode === 'google' || mode === 'openstreetmap') && <b>DADOS REAIS · </b>}{notice}</p>
           </section>
 
-          <section className="leads-panel">
-            <div className="panel-heading leads-heading"><span>02</span><div><b>Melhores oportunidades</b><small>Da maior para a menor quantidade de avaliações</small></div><div className="sort-chip">↓ AVALIAÇÕES</div></div>
+          <section className="leads-panel" id="oportunidades">
+            <div className="panel-heading leads-heading"><span>02</span><div><b>Oportunidades reais</b><small>Cadastros sem site informado na fonte consultada</small></div><div className="sort-chip">DADOS PÚBLICOS</div></div>
             <div className="lead-list">
               {!leads.length && !searching && (
                 <div className="empty-state"><div>⌁</div><b>Seu radar está pronto</b><p>Escolha os filtros e inicie uma busca.</p></div>
               )}
               {searching && <div className="empty-state"><div className="spinner" /><b>Buscando oportunidades</b><p>Verificando reputação e presença digital.</p></div>}
               {!searching && leads.map((lead, index) => (
-                <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => setSelectedLead(lead)}>
+                <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => void selectOpportunity(lead)}>
                   <span className="rank-number">{String(index + 1).padStart(2, '0')}</span>
-                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">☎ {lead.phone}</small><i>SEM SITE</i></span>
-                  <span className="rating"><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></span>
+                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">{lead.phone ? `☎ ${lead.phone}` : 'Contato não informado na fonte'}</small><i>SEM SITE INFORMADO</i></span>
+                  <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>{lead.source === 'google' ? 'Google Places' : 'OpenStreetMap'}</small></>}</span>
                   <span className="select-arrow">›</span>
                 </button>
               ))}
             </div>
             {selectedLead && (
               <div className="contact-bar">
-                <span><small>TELEFONE PÚBLICO</small><b>{selectedLead.phone}</b></span>
-                <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>
-                <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>
+                <span><small>{selectedLead.phone ? 'TELEFONE PÚBLICO' : 'FONTE PÚBLICA'}</small><b>{selectedLead.phone || (selectedLead.source === 'google' ? 'Google Places' : 'OpenStreetMap')}</b></span>
+                {selectedLead.phone && <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>}
+                {selectedLead.phone && <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>}
+                <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">Ver cadastro ↗</a>
               </div>
             )}
           </section>
 
-          <section className="ai-panel">
-            <div className="panel-heading"><span>03</span><div><b>Escolha a IA</b><small>Gerar o briefing dentro do site</small></div></div>
-            <div className="ranking-note">Agentes integrados no painel — sem sair da plataforma.</div>
+          <section className="ai-panel" id="direcao">
+            <div className="panel-heading"><span>03</span><div><b>Direção criativa</b><small>Cada caminho muda narrativa, copy e interação</small></div></div>
+            <div className="ranking-note">Selecione uma direção para regenerar um prompt realmente diferente.</div>
             <div className="ai-list">
-              {aiRanking.map((ai) => (
+              {creativeDirections.map((direction, index) => (
                 <button
-                  key={ai.name}
+                  key={direction.id}
                   type="button"
-                  className={activeAi === ai.name ? 'ai-row selected' : 'ai-row'}
+                  className={activeDirection === direction.id ? 'ai-row selected' : 'ai-row'}
                   onClick={async () => {
-                    setActiveAi(ai.name);
-                    const provider = ai.name.toLowerCase();
-                    await generateIntegratedPrompt(
-                      provider === 'gemini' ? 'gemini'
-                      : provider === 'codex' ? 'codex'
-                      : provider === 'cursor' ? 'cursor'
-                      : provider === 'claude' ? 'openai'
-                      : provider === 'chatgpt' ? 'openai'
-                      : provider === 'openai' ? 'openai'
-                      : 'gemini'
-                    );
+                    setActiveDirection(direction.id);
+                    setVariation(0);
+                    if (selectedLead) await generateIntegratedPrompt(direction.id, selectedLead, 0);
+                    else setNotice('Direção escolhida. Agora selecione uma oportunidade real.');
                   }}
                 >
-                  <span className="ai-rank">#{ai.rank}</span><span className="ai-logo" style={{ background: ai.color }}>{ai.name.charAt(0)}</span>
-                  <span className="ai-info"><b>{ai.name}</b><small>{ai.kind}</small><em>{ai.reason}</em></span>
-                  <span className="ai-score">{ai.score}<small>/10</small></span>
+                  <span className="ai-rank">0{index + 1}</span><span className="ai-logo" style={{ background: direction.color }}>{direction.name.charAt(0)}</span>
+                  <span className="ai-info"><b>{direction.name}</b><small>{direction.kind}</small><em>{direction.reason}</em></span>
+                  <span className="ai-score">↗</span>
                 </button>
               ))}
             </div>
           </section>
 
-          <section className="prompt-panel">
+          <section className="prompt-panel" id="brief">
             <div className="prompt-header">
               <div className="panel-heading"><span>04</span><div><b>Prompt premium automático</b><small>{selectedLead ? `Personalizado para ${selectedLead.name}` : 'Será personalizado com o lead selecionado'}</small></div></div>
               <div className="prompt-actions">
-                <button type="button" onClick={() => generateIntegratedPrompt('gemini')} disabled={generatingPrompt}>{generatingPrompt ? 'Gerando...' : 'Gerar com Gemini'}</button>
-                <button type="button" onClick={() => copyPromptFor('cursor')} className="ghost-button">Copiar para Cursor</button>
-                <button type="button" onClick={() => copyPromptFor('codex')} className="ghost-button">Copiar para Codex</button>
-                <button type="button" onClick={copyPrompt}>{copied ? 'Copiado ✓' : 'Copiar prompt'}</button>
+                <button type="button" onClick={() => void regenerateVariation()} disabled={generatingPrompt || !selectedLead}>{generatingPrompt ? 'Gerando...' : 'Gerar nova variação'}</button>
+                <button type="button" onClick={copyPrompt} disabled={!generatedBrief}>{copied ? 'Copiado ✓' : 'Copiar prompt'}</button>
               </div>
             </div>
             <div className="prompt-code">
               <div className="prompt-top"><span>prompt-site.md</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
               <textarea className="prompt-editor" value={activePrompt} onChange={(event) => setGeneratedBrief(event.target.value)} aria-label="Prompt do site" />
             </div>
-            <div className="prompt-footer"><span>✦ Gerado automaticamente</span><span>Sem inventar informações</span><span>Pronto para qualquer IA</span></div>
+            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Gatilhos éticos</span><span>Sem inventar informações</span><span>Pronto para qualquer IA</span></div>
           </section>
         </div>
       </section>

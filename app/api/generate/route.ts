@@ -2,236 +2,217 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const MAX_FIELD_LENGTH = 600;
 
-function getProfessionContext(segment: string) {
-  const key = segment.toLowerCase();
-  const map: Record<string, string> = {
-    barbearia: 'Foque em distinção masculina, precisão de corte, barba, ambiente elegante, confiança e agendamento premium.',
-    imobiliária: 'Foque em imóveis de alto padrão, localização, valor, compra e locação com comunicação de confiança e status.',
-    'clínica de estética': 'Foque em bem-estar, transformação, estética, acolhimento, tratamentos e sensação de cuidado premium.',
-    odontologia: 'Foque em confiança clínica, conforto, saúde bucal, estética e atendimento de alto padrão.',
-    advocacia: 'Foque em autoridade, sigilo, expertise jurídica, estratégia e atendimento sério e confiável.',
-    restaurante: 'Foque em gastronomia, experiência sensorial, ambiente, reservas, serviço premium e marca memorável.',
-    academia: 'Foque em performance, resultado, disciplina, energia, estrutura e transformação corporal.',
-    'pet shop': 'Foque em cuidado animal, confiança, banho e tosa, bem-estar e atendimento amigável.',
-    'salão de beleza': 'Foque em autoestima, imagem pessoal, beleza, cuidado premium e agenda de serviços.',
-    contabilidade: 'Foque em organização, segurança financeira, clareza fiscal, confiança e gestão eficiente.',
-    'oficina mecânica': 'Foque em confiança técnica, manutenção, diagnóstico, qualidade de serviço e transparência.',
-    fotografia: 'Foque em memória, estética, emoção, portfólio e valor de registrar momentos de alto nível.',
-    psicologia: 'Foque em acolhimento, cuidado emocional, clareza e sentimento de segurança no processo terapêutico.',
-    consultoria: 'Foque em estratégia, clareza, autoridade, soluções e projeção de crescimento.',
-    lavanderia: 'Foque em praticidade, higiene, conveniência, rapidez e confiança no cuidado de roupas.',
-    'design de interiores': 'Foque em espaço, beleza, luxo discreto, funcionalidade e transformação emocional do ambiente.',
-    seguros: 'Foque em proteção, tranquilidade, clareza e confiança em decisões importantes.',
-    hotel: 'Foque em hospitalidade, conforto, experiência memorável, categoria premium e acolhimento.',
-    'auto center': 'Foque em confiança automotiva, manutenção, diagnóstico e qualidade de atendimento profissional.',
-    'agência de marketing': 'Foque em crescimento, presença digital, autoridade, performance e posicionamento de marca.',
-  };
+type LeadInput = {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  mapsUrl: string;
+  source: 'google' | 'openstreetmap';
+  rating: number | null;
+  reviewCount: number | null;
+};
 
-  return map[key] || 'Foque em diferenciais reais do setor, autoridade local, muito clareza e experiência premium para esse negócio.';
+const SEGMENT_CONTEXT: Record<string, { desire: string; action: string; proof: string; imagery: string }> = {
+  barbearia: { desire: 'identidade, precisão e ritual de cuidado', action: 'agendar um horário', proof: 'acabamento, consistência e experiência', imagery: 'retratos fechados, metal escovado, couro e luz recortada' },
+  imobiliária: { desire: 'segurança para decidir e visão de futuro', action: 'solicitar atendimento', proof: 'conhecimento local, curadoria e clareza', imagery: 'arquitetura, luz natural, mapas e enquadramentos amplos' },
+  'clínica de estética': { desire: 'autocuidado, confiança e transformação possível', action: 'solicitar uma avaliação', proof: 'acolhimento, método e transparência', imagery: 'pele real, luz difusa, texturas naturais e detalhes delicados' },
+  odontologia: { desire: 'segurança, conforto e liberdade para sorrir', action: 'marcar uma consulta', proof: 'clareza clínica, cuidado e confiança', imagery: 'formas orgânicas, luz clínica suave e precisão visual' },
+  advocacia: { desire: 'clareza diante de decisões complexas', action: 'conversar com a equipe', proof: 'discrição, método e domínio técnico', imagery: 'tipografia editorial, pedra, papel e luz arquitetônica' },
+  restaurante: { desire: 'antecipação, sabor e vontade de viver a experiência', action: 'fazer uma reserva', proof: 'ambiente, cuidado e identidade gastronômica', imagery: 'ingredientes, vapor, gestos de cozinha e luz quente' },
+  academia: { desire: 'progresso visível, energia e pertencimento', action: 'conhecer a estrutura', proof: 'rotina, acompanhamento e ambiente', imagery: 'movimento, contraste alto, suor e luz gráfica' },
+  'pet shop': { desire: 'tranquilidade para quem cuida e bem-estar para o pet', action: 'pedir atendimento', proof: 'carinho, higiene e confiança', imagery: 'expressões naturais, proximidade e cor controlada' },
+  'salão de beleza': { desire: 'autoexpressão, confiança e cuidado pessoal', action: 'reservar um horário', proof: 'escuta, técnica e acabamento', imagery: 'texturas de cabelo, espelhos, movimento e luz editorial' },
+  contabilidade: { desire: 'controle, tranquilidade e tempo para crescer', action: 'pedir uma análise inicial', proof: 'organização, clareza e acompanhamento', imagery: 'dados limpos, documentos, grids e detalhes precisos' },
+  'oficina mecânica': { desire: 'voltar à estrada com segurança e sem surpresas', action: 'solicitar um diagnóstico', proof: 'transparência, processo e domínio técnico', imagery: 'metal, ferramentas, detalhes mecânicos e luz industrial' },
+  fotografia: { desire: 'preservar histórias com uma linguagem autoral', action: 'consultar uma data', proof: 'olhar, direção e consistência estética', imagery: 'luz, grão, enquadramentos imersivos e respiros amplos' },
+  psicologia: { desire: 'acolhimento, escuta e um espaço seguro para avançar', action: 'solicitar informações', proof: 'presença, confidencialidade e clareza', imagery: 'luz calma, matéria natural e composições silenciosas' },
+  consultoria: { desire: 'clareza estratégica e movimento com direção', action: 'agendar uma conversa', proof: 'método, diagnóstico e visão de negócio', imagery: 'diagramas, tipografia forte e movimento controlado' },
+  lavanderia: { desire: 'ganhar tempo com praticidade e confiança', action: 'consultar o atendimento', proof: 'cuidado, higiene e previsibilidade', imagery: 'tecidos, água, dobras e superfícies limpas' },
+  'design de interiores': { desire: 'viver melhor em espaços com identidade', action: 'apresentar um projeto', proof: 'repertório, escuta e funcionalidade', imagery: 'materiais, plantas, luz e detalhes arquitetônicos' },
+  seguros: { desire: 'proteger escolhas importantes com tranquilidade', action: 'solicitar uma orientação', proof: 'clareza, proximidade e responsabilidade', imagery: 'vida cotidiana, gestos humanos e composição sólida' },
+  hotel: { desire: 'pausa, conforto e uma estadia memorável', action: 'consultar disponibilidade', proof: 'hospitalidade, localização e atenção aos detalhes', imagery: 'luz da manhã, tecidos, paisagem e ritmo contemplativo' },
+  'auto center': { desire: 'confiança para dirigir e cuidar do patrimônio', action: 'solicitar atendimento', proof: 'diagnóstico, transparência e execução', imagery: 'linhas automotivas, metal, movimento e luz técnica' },
+  'agência de marketing': { desire: 'crescimento com identidade e direção', action: 'agendar um diagnóstico', proof: 'estratégia, criatividade e mensuração', imagery: 'tipografia cinética, dados, cultura e composições ousadas' },
+};
+
+const CREATIVE_DIRECTIONS: Record<string, { label: string; rhythm: string; interface: string }> = {
+  cinematic: { label: 'Cinematográfica', rhythm: 'imersivo, com tensão crescente e grandes momentos de revelação', interface: 'hero de impacto, transições suaves, camadas e movimento ligado ao scroll' },
+  editorial: { label: 'Editorial', rhythm: 'preciso, elegante e guiado por tipografia e composição', interface: 'grid assimétrico, respiros amplos, títulos autorais e imagens em escala' },
+  conversion: { label: 'Conversão', rhythm: 'direto, confiante e progressivo, removendo objeções a cada bloco', interface: 'hierarquia cristalina, prova perto do CTA e caminhos curtos para contato' },
+  local: { label: 'Presença local', rhythm: 'próximo, específico e reconhecível para quem vive na região', interface: 'referências de localização, mapa, contato evidente e sinais reais de proximidade' },
+};
+
+function clean(value: unknown, max = MAX_FIELD_LENGTH) {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max) : '';
 }
 
-function getGeminiPrompt(profile: Record<string, string>, leadName?: string) {
-  const business = profile.business || 'Seu negócio';
-  const segment = profile.segment || 'serviço';
-  const cityLine = profile.city && profile.state ? `${profile.city}, ${profile.state}` : profile.city || 'sua cidade';
-  const audience = profile.audience || 'clientes locais';
-  const objective = profile.objective || 'aumentar conversas e agendamentos';
-  const leadContext = leadName ? `Empresa selecionada: ${leadName}.` : 'Empresa com potencial de conversão local.';
-  const professionContext = getProfessionContext(segment);
-
-  return `Crie um site premium de nível Aether1 para ${business}, um negócio de ${segment} em ${cityLine}. ${leadContext} O público-alvo é ${audience}. O objetivo principal é ${objective}. A direção estética deve ter a mesma energia de uma marca de alto padrão: minimalista, elegante, tecnológica, cinematográfica, muito sofisticada e claramente premium.
-
-ESTRATÉGIA DO NEGÓCIO
-${professionContext}
-
-ESTILO DE MARCA
-- A marca deve parecer um produto premium de alto valor, e não um site tradicional de prestador de serviço.
-- Visual minimalista, editorial e refinado, com sensação de exclusividade.
-- Paleta premium: preto, grafite, cinza profundo, branco frio, dourado muito discreto ou prata.
-- Tipografia forte, moderna e elegante, com presença e impacto imediato.
-- Muito espaço em branco, contraste inteligente, composição precisa e acabamento impecável.
-- Design impossível de confundir com template genérico: marca premium, tecnologia e prestígio.
-
-POSICIONAMENTO E VENDAS
-- Posicionar ${business} como referência local premium e de confiança.
-- Criar percepção de autoridade, qualidade e alto valor percebido em segundos.
-- Transformar visitantes locais em conversas, agendamentos e orçamentos.
-- Comunicar valor de forma clara, elegante e não genérica.
-- Foco em autoridade, estética premium e estratégia de conversão real.
-
-VOZ E COPY
-- Linguagem em português do Brasil, sofisticada, direta, aspiracional, refinada e sem clichês.
-- Textos curtos, fortes, memoráveis e com presença de marca premium.
-- Frases que geram valor percebido e confiança imediata.
-- Não usar promessas exageradas, números inventados, depoimentos falsos ou afirmações genéricas.
-- Escrever com sensação de marca de alto padrão, não como prestador comum.
-- A mensagem precisa refletir exatamente o setor de ${segment.toLowerCase()} e não cair em um tom genérico para qualquer negócio.
-
-ESTRUTURA DA LANDING PAGE
-1. Hero cinematográfico e impactante com proposta de valor premium, localização clara e CTA refinado.
-2. Seção de reputação e autoridade local, com avaliações reais, diferenciais e prova social.
-3. Seção de ${segment} em formato editorial e premium, mostrando benefício e experiência.
-4. Diferenciais com narrativa premium, clareza e alto valor percebido.
-5. Processo em 3 passos simples, humanizados e fáceis de entender.
-6. Bloco de confiança e clareza com segurança, objetivo e atendimento refinado.
-7. FAQ elegante com respostas relevantes e úteis.
-8. CTA final forte com mapa/localização, contato e rodapé premium.
-
-REQUISITOS TÉCNICOS
-- Mobile first, responsivo, rápido e acessível.
-- SEO local para “${segment} em ${cityLine}”.
-- HTML semântico, navegação acessível e contraste adequado.
-- Códigos limpos, organização clara e solução pronta para produção.
-- Incluir metadados, Open Graph e favicon.
-- Manter o visual premium, discreto, elevado e extremamente bem acabado.
-- Ajustar o tom para ${segment.toLowerCase()} em vez de repetir um mesmo briefing para todos os negócios.
-
-ENTREGA
-Retorne um prompt de criação de site altamente específico, detalhado e pronto para colar em Gemini, Claude, Cursor, Codex ou ChatGPT. O resultado deve ter nível de acabamento próximo ao de marcas premium top de mercado, com estrutura estratégica, visual imponente e copy refinada, sem inventar informações.
-
-Formato ideal:
-- Nome da marca
-- Posicionamento premium
-- Público-alvo
-- Visual e estética
-- Hero headline
-- Seções e estrutura
-- Copy principal
-- CTAs premium
-- SEO local
-- Regras de qualidade
-- Resultado esperado`; 
+function cleanNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function clean(value: unknown) {
-  return typeof value === 'string' ? value.trim().slice(0, MAX_FIELD_LENGTH) : '';
+function hash(value: string) {
+  let result = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index);
+    result = Math.imul(result, 16777619);
+  }
+  return Math.abs(result >>> 0);
 }
 
-function localPlan(profile: Record<string, string>) {
-  const palettes: Record<string, { primary: string; accent: string; background: string }> = {
-    elegante: { primary: '#25231f', accent: '#a9bf46', background: '#f4f0e7' },
-    direto: { primary: '#14213d', accent: '#fca311', background: '#f7f8fb' },
-    moderno: { primary: '#21164b', accent: '#8cff66', background: '#f0eeff' },
-    técnico: { primary: '#12343b', accent: '#2d9d78', background: '#edf5f3' },
-    leve: { primary: '#563d5e', accent: '#ff9e80', background: '#fff5ef' },
+function buildOpportunityPrompt(profile: Record<string, string>, lead: LeadInput, directionKey: string, variation: number) {
+  const segment = profile.segment.toLowerCase();
+  const context = SEGMENT_CONTEXT[segment] ?? {
+    desire: 'confiança para escolher e clareza para agir', action: 'iniciar uma conversa',
+    proof: 'presença, processo e atendimento', imagery: 'fotografia real, tipografia autoral e detalhes do ofício',
   };
-  const toneKey = Object.keys(palettes).find((key) => profile.tone.toLowerCase().includes(key)) ?? 'elegante';
-  const cityLine = profile.city && profile.state ? `${profile.city}, ${profile.state}` : profile.city;
-  return {
-    headline: `${profile.business}: ${profile.segment.toLowerCase()} pensada para você.`,
-    subheadline: `${profile.audience || 'Atendimento próximo e personalizado'} em ${cityLine}. Uma experiência clara, humana e feita para ${profile.objective.toLowerCase() || 'gerar resultados reais'}.`,
-    cta: profile.objective.toLowerCase().includes('whatsapp') ? 'Falar pelo WhatsApp' : 'Quero conversar',
-    benefits: ['Atendimento sob medida', `Presença forte em ${profile.city}`, 'Contato rápido e transparente'],
-    tone: profile.tone,
-    palette: palettes[toneKey],
-  };
+  const direction = CREATIVE_DIRECTIONS[directionKey] ?? CREATIVE_DIRECTIONS.cinematic;
+  const seed = hash(`${lead.id}:${directionKey}:${variation}`);
+  const concepts = [
+    `Da primeira impressão à decisão: transformar ${context.proof} em uma experiência digital que se prova nos detalhes.`,
+    `O valor que já existe, agora visível: revelar a qualidade de ${lead.name} com uma narrativa de descoberta progressiva.`,
+    `Confiança antes do contato: fazer cada seção reduzir uma dúvida e aumentar a vontade de ${context.action}.`,
+    `Presença que se sente: traduzir o negócio real, a localização e o ofício em uma marca digital memorável.`,
+  ];
+  const heroPatterns = [
+    `“${lead.name}. ${context.desire.charAt(0).toUpperCase()}${context.desire.slice(1)}.”`,
+    '“Quando cada detalhe importa, a escolha começa aqui.”',
+    `“Uma nova forma de viver ${segment} em ${profile.city}.”`,
+    '“O cuidado certo muda toda a experiência.”',
+  ];
+  const concept = concepts[seed % concepts.length];
+  const hero = heroPatterns[(seed + variation) % heroPatterns.length];
+  const ratingFact = lead.rating !== null && lead.reviewCount !== null
+    ? `${lead.rating.toFixed(1)} estrelas em ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas`
+    : 'a fonte consultada não fornece nota nem avaliações; não criar esses números';
+  const phoneFact = lead.phone || 'telefone não informado na fonte';
+  const sourceLabel = lead.source === 'google' ? 'Google Places' : 'OpenStreetMap';
+
+  return `# PROMPT DE PRODUÇÃO — ${lead.name}
+
+Crie uma landing page autoral, premium e de alta conversão para **${lead.name}**, um negócio real de **${profile.segment}** em **${profile.city}/${profile.state}**. Use como referência de nível — sem copiar layout, texto ou identidade — a capacidade do projeto Aether 1 de unir storytelling de marca, interações avançadas e tecnologia em uma experiência digital marcante.
+
+## DADOS VERIFICADOS — NÃO ALTERAR NEM COMPLETAR POR SUPOSIÇÃO
+- Nome: ${lead.name}
+- Segmento pesquisado: ${profile.segment}
+- Endereço/localização pública: ${lead.address || `${profile.city}/${profile.state}`}
+- Contato público: ${phoneFact}
+- Reputação pública: ${ratingFact}
+- Fonte do cadastro: ${sourceLabel}
+- Link da fonte/mapa: ${lead.mapsUrl || 'não informado'}
+- O site não foi informado na fonte consultada. Não afirmar que a empresa nunca teve site.
+- É proibido inventar serviços específicos, preços, horários, equipe, anos de mercado, prêmios, depoimentos, certificações, garantias ou resultados.
+
+## HIPÓTESE CRIATIVA EXCLUSIVA
+**Direção:** ${direction.label}.
+**Conceito:** ${concept}
+**Desejo central do público:** ${context.desire}.
+**Ritmo narrativo:** ${direction.rhythm}.
+**Linguagem visual:** ${context.imagery}; ${direction.interface}.
+**Ponto de partida para o hero:** ${hero} Reescreva se necessário, preservando o conceito e sem fazer promessa não comprovada.
+
+## GATILHOS MENTAIS — USO ÉTICO E BASEADO EM FATOS
+1. **Especificidade:** citar ${profile.city}, o segmento e detalhes reais da fonte para a página não servir a qualquer empresa.
+2. **Prova social:** ${lead.rating !== null ? `usar somente a nota e as ${lead.reviewCount?.toLocaleString('pt-BR')} avaliações acima` : 'não usar notas, estrelas ou quantidade de clientes'}.
+3. **Autoridade por processo:** demonstrar clareza, método e cuidado; nunca declarar liderança, superioridade ou especialização sem prova.
+4. **Antecipação:** fazer o visitante imaginar a experiência e o benefício emocional antes de apresentar o CTA.
+5. **Redução de risco:** explicar o próximo passo com linguagem simples, sem compromisso inventado e sem garantia falsa.
+6. **Proximidade:** conectar a mensagem à realidade local de ${profile.city}/${profile.state}.
+7. **Curiosidade:** abrir lacunas narrativas entre seções, revelando o valor em etapas sem clickbait.
+8. **Microcompromisso:** usar CTAs progressivos — primeiro explorar, depois entender, por fim ${context.action}.
+9. **Urgência somente real:** não criar contagem regressiva, vagas limitadas, desconto, escassez ou prazo que não conste nos dados.
+
+## COPY QUE DEVE SER ENTREGUE
+Escreva todo o texto final em português do Brasil. A página precisa incluir:
+- eyebrow local específico;
+- headline curta, original e memorável, sem “excelência”, “transforme seus sonhos” ou clichês semelhantes;
+- subheadline que una desejo, clareza e localização;
+- CTA principal coerente com o contato disponível e um CTA secundário para ver detalhes;
+- uma sequência de 3 blocos de valor, cada um com título de até 5 palavras e texto concreto;
+- uma seção “Por que isso importa” com narrativa emocional e racional;
+- bloco de confiança usando apenas os dados verificados;
+- processo em 3 etapas que explique a jornada sem inventar operação interna;
+- respostas para 5 objeções reais do segmento, formuladas sem afirmar fatos desconhecidos;
+- CTA final com redução de fricção e instrução clara do próximo passo;
+- microcopy de botões, estados, formulário e rodapé.
+
+## EXPERIÊNCIA VISUAL E INTERAÇÕES
+- Evite template SaaS, cartões repetitivos, excesso de gradientes e aparência genérica de IA.
+- Construa uma abertura memorável com tipografia de grande escala, composição intencional e uma interação principal ligada ao conceito.
+- Use movimento para revelar significado: parallax sutil, máscaras, mudanças de escala e transições de seção; respeite prefers-reduced-motion.
+- Use imagens reais/licenciadas coerentes com ${profile.segment}; nunca gerar imagens que pareçam retratar equipe, sede ou clientes reais da empresa.
+- Faça o mobile parecer projetado, não apenas reduzido: navegação clara, CTA alcançável e leitura confortável.
+- Inclua estados hover, focus, loading, sucesso e erro. Garanta contraste, navegação por teclado e HTML semântico.
+
+## ESTRUTURA RECOMENDADA
+1. Hero narrativo com proposta, localização e CTA.
+2. Sinal de confiança baseado nos dados reais disponíveis.
+3. Manifesto curto: o problema vivido pelo cliente e a mudança desejada.
+4. Três pilares de valor ligados a ${context.proof}.
+5. Seção visual imersiva que demonstre o universo de ${profile.segment} sem alegações factuais.
+6. Jornada em três passos e redução de objeções.
+7. Localização, mapa/fonte pública e contato real.
+8. FAQ e CTA final.
+
+## REGRAS DE IMPLEMENTAÇÃO
+- Design responsivo, mobile first, rápido e acessível.
+- SEO local natural para “${profile.segment} em ${profile.city}”.
+- Metadados, Open Graph, favicon e dados estruturados apenas com fatos disponíveis.
+- Botão de telefone somente se houver número real; não presumir que o número possui WhatsApp.
+- Não copiar Aether 1. Buscar o mesmo nível de intenção, narrativa e acabamento com uma solução própria para esta oportunidade.
+- Não reutilizar headline, conceito, paleta ou sequência narrativa de outro lead.
+
+## RESULTADO
+Entregue a página completa, pronta para produção, com copy final e direção visual coerentes. Antes de finalizar, faça uma auditoria factual: toda afirmação sobre ${lead.name} deve ser rastreável aos dados verificados acima. Variação criativa: ${variation + 1}-${seed.toString(36).slice(0, 6)}.`;
 }
 
-function safePlan(plan: ReturnType<typeof localPlan>) {
-  const fallback = { primary: '#25231f', accent: '#a9bf46', background: '#f4f0e7' };
-  const color = (value: string, key: keyof typeof fallback) => /^#[0-9a-f]{6}$/i.test(value) ? value : fallback[key];
-  return {
-    headline: clean(plan.headline), subheadline: clean(plan.subheadline), cta: clean(plan.cta),
-    benefits: Array.isArray(plan.benefits) ? plan.benefits.slice(0, 3).map(clean) : localPlan({ business: 'Seu negócio', segment: 'serviço', audience: '', objective: '', tone: '', city: '', state: '' }).benefits,
-    tone: clean(plan.tone),
-    palette: { primary: color(plan.palette?.primary, 'primary'), accent: color(plan.palette?.accent, 'accent'), background: color(plan.palette?.background, 'background') },
-  };
+function extractResponseText(result: { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }) {
+  if (result.output_text) return result.output_text;
+  return result.output?.flatMap((item) => item.content ?? []).map((item) => item.text ?? '').join('\n').trim() ?? '';
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const profile = {
-      business: clean(body.business), segment: clean(body.segment), audience: clean(body.audience),
-      objective: clean(body.objective), tone: clean(body.tone), city: clean(body.city), state: clean(body.state),
+    const body = (await request.json()) as Record<string, unknown> | null;
+    const profile = { segment: clean(body?.segment), city: clean(body?.city), state: clean(body?.state) };
+    const rawLead = body?.lead && typeof body.lead === 'object' ? body.lead as Record<string, unknown> : {};
+    const lead: LeadInput = {
+      id: clean(rawLead.id), name: clean(rawLead.name), address: clean(rawLead.address), phone: clean(rawLead.phone),
+      mapsUrl: clean(rawLead.mapsUrl), source: rawLead.source === 'google' ? 'google' : 'openstreetmap',
+      rating: cleanNumber(rawLead.rating), reviewCount: cleanNumber(rawLead.reviewCount),
     };
-    if (!profile.business || !profile.segment || !profile.city) {
-      return NextResponse.json({ error: 'Perfil incompleto.' }, { status: 400 });
+    const direction = clean(body?.direction || 'cinematic').toLowerCase();
+    const variation = Math.max(0, Math.min(99, Number(body?.variation) || 0));
+
+    if (!profile.segment || !profile.city || !profile.state || !lead.id || !lead.name) {
+      return NextResponse.json({ error: 'Selecione uma oportunidade real antes de gerar o texto.' }, { status: 400 });
     }
 
-    const engine = clean(body.engine || '').toLowerCase();
-    const leadName = clean(body.leadName || body.lead?.name || '');
-    const fallbackPlan = localPlan(profile);
-
-    if (engine === 'gemini') {
-      const geminiApiKey = process.env.GEMINI_API_KEY;
-      if (!geminiApiKey) {
-        const prompt = getGeminiPrompt(profile, leadName);
-        return NextResponse.json({ prompt, plan: fallbackPlan, mode: 'local', notice: 'Gemini não configurado; prompt detalhado gerado localmente.' });
-      }
-
-      const geminiPayload = {
-        contents: [{
-          parts: [{
-            text: getGeminiPrompt(profile, leadName),
-          }],
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1600,
-        },
-      };
-
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geminiPayload),
-      });
-
-      const result = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; error?: { message?: string } };
-      const text = result.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
-
-      if (!response.ok || !text) {
-        const fallbackPrompt = getGeminiPrompt(profile, leadName);
-        return NextResponse.json({ prompt: fallbackPrompt, plan: fallbackPlan, mode: 'local', notice: result.error?.message || 'Gemini indisponível; prompt local gerado.' });
-      }
-
-      return NextResponse.json({ prompt: text, plan: fallbackPlan, mode: 'gemini' });
-    }
-
+    const sourcePrompt = buildOpportunityPrompt(profile, lead, direction, variation);
     const apiKey = process.env.OPENAI_API_KEY;
-    if (clean(body.engine) === 'local' || !apiKey) {
-      const prompt = getGeminiPrompt(profile, leadName);
-      return NextResponse.json({ plan: fallbackPlan, prompt, mode: 'local' });
+    const model = process.env.OPENAI_MODEL;
+    if (!apiKey || !model) {
+      return NextResponse.json({ prompt: sourcePrompt, mode: 'local', notice: 'Brief exclusivo gerado com os dados reais da oportunidade.' });
     }
 
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-        store: false,
-        max_output_tokens: 900,
-        instructions: 'Você é o agente do Lead Studio, especialista em landing pages brasileiras de alta conversão. Crie copy clara, específica e ética. Não invente números, avaliações, certificações ou garantias. Responda somente no JSON solicitado, em português do Brasil.',
-        input: `Crie o plano de uma landing page para este perfil:\n${JSON.stringify(profile)}`,
-        text: {
-          format: {
-            type: 'json_schema', name: 'lead_site_plan', strict: true,
-            schema: {
-              type: 'object', additionalProperties: false,
-              properties: {
-                headline: { type: 'string' }, subheadline: { type: 'string' }, cta: { type: 'string' },
-                benefits: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'string' } },
-                tone: { type: 'string' },
-                palette: {
-                  type: 'object', additionalProperties: false,
-                  properties: { primary: { type: 'string' }, accent: { type: 'string' }, background: { type: 'string' } },
-                  required: ['primary', 'accent', 'background'],
-                },
-              },
-              required: ['headline', 'subheadline', 'cta', 'benefits', 'tone', 'palette'],
-            },
-          },
-        },
+        model, store: false, max_output_tokens: 2600,
+        instructions: 'Você é um diretor criativo sênior e estrategista de conversão. Reescreva o brief recebido como um prompt de produção único, específico e executável. Preserve todos os dados verificados exatamente. Use gatilhos mentais éticos, nunca invente provas, serviços, urgência ou atributos da empresa. Não copie Aether 1; trate-o apenas como referência de ambição narrativa e acabamento. Responda somente com o prompt final em Markdown, em português do Brasil.',
+        input: sourcePrompt,
       }),
+      signal: AbortSignal.timeout(45_000),
     });
-
-    const result = await response.json() as { output_text?: string; error?: { message?: string } };
-    if (!response.ok || !result.output_text) {
-      return NextResponse.json({ plan: fallbackPlan, prompt: getGeminiPrompt(profile, leadName), mode: 'local', notice: result.error?.message || 'OpenAI indisponível.' });
+    const result = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }>; error?: { message?: string } };
+    const generated = extractResponseText(result);
+    if (!response.ok || !generated) {
+      return NextResponse.json({ prompt: sourcePrompt, mode: 'local', notice: 'A IA ficou indisponível; o brief exclusivo foi gerado pelo motor seguro do site.' });
     }
-    return NextResponse.json({ plan: safePlan(JSON.parse(result.output_text)), prompt: getGeminiPrompt(profile, leadName), mode: 'openai' });
+
+    return NextResponse.json({ prompt: generated, mode: 'openai', notice: `Texto exclusivo criado para ${lead.name}, com gatilhos éticos e dados verificados.` });
   } catch {
-    return NextResponse.json({ error: 'Ocorreu um erro ao processar a geração.' }, { status: 500 });
+    return NextResponse.json({ error: 'Não foi possível gerar o texto desta oportunidade.' }, { status: 500 });
   }
 }

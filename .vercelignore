@@ -1,0 +1,14 @@
+.git
+.next
+.vinext
+.wrangler
+.openai
+dist
+node_modules
+coverage
+outputs
+work
+tsconfig.tsbuildinfo
+COMPONENTES_HTML.html
+.env*
+!.env.example

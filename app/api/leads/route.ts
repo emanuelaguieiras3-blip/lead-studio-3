@@ -15,7 +15,7 @@ try {
     }
   }
 
-  NextResponse = FallbackNextResponse as typeof import('next/server').NextResponse;
+  NextResponse = FallbackNextResponse as unknown as typeof import('next/server').NextResponse;
 }
 
 type GooglePlace = {
@@ -32,9 +32,30 @@ type GooglePlace = {
 
 type GoogleResponse = { places?: GooglePlace[]; nextPageToken?: string };
 
+type OsmElement = {
+  id: number;
+  type: 'node' | 'way' | 'relation';
+  tags?: Record<string, string>;
+};
+
+type NominatimResult = {
+  lat?: string;
+  lon?: string;
+  boundingbox?: [string, string, string, string];
+  osm_type?: 'node' | 'way' | 'relation';
+  osm_id?: number;
+  name?: string;
+  display_name?: string;
+  type?: string;
+  category?: string;
+  extratags?: Record<string, string>;
+};
+
 const ALLOWED_PROFESSIONS = new Set([
   'Barbearia', 'Imobiliária', 'Clínica de estética', 'Odontologia', 'Advocacia', 'Restaurante',
   'Academia', 'Pet shop', 'Salão de beleza', 'Contabilidade', 'Oficina mecânica', 'Fotografia',
+  'Psicologia', 'Consultoria', 'Lavanderia', 'Design de interiores', 'Seguros', 'Hotel',
+  'Auto Center', 'Agência de marketing',
 ]);
 const requestWindows = new Map<string, { startedAt: number; count: number }>();
 const WINDOW_MS = 60_000;
@@ -84,42 +105,134 @@ export function filterLeadCandidates(results: GooglePlace[], minReviews: number)
     .sort((a, b) => b.reviewCount - a.reviewCount || b.rating - a.rating);
 }
 
-export function buildFallbackLeads(profession: string, city: string, state: string) {
-  const baseNames = {
-    'Barbearia': ['Barbearia Nova Era', 'Estilo & Corte', 'The Blade Studio', 'Barbearia Atlas', 'Corte & Arte', 'Luxe Barber', 'Barbearia Módulo', 'A Casa do Corte', 'Centro do Barbeiro', 'Prime Blade'],
-    'Imobiliária': ['Imóveis Prime', 'Residencial Horizonte', 'Capital Realty', 'Vila Imóveis', 'Urbania Homes', 'Top Imóveis', 'Áurea Realty', 'Nobre Moradia', 'Terra & Vida', 'Metro Plus'],
-    'Clínica de estética': ['Glow Clínica', 'Lume Estética', 'Bella Forma', 'Studio Glow', 'Astera Care', 'Novo Rosto', 'Vision Estética', 'Skin Lab', 'Vita Beauty', 'Luna Clinic'],
-    'Odontologia': ['Smile Studio', 'Sorriso Mais', 'Dental Prime', 'Clínica Fênix', 'Vitta Odonto', 'Aretê Dental', 'Aura Dental', 'Bela Smile', 'Odonto Vital', 'Smile Art'],
-    'Advocacia': ['Advocacia Horizonte', 'Legal & Associados', 'Fórum Direito', 'Nobre Advocacia', 'Direito & Cia', 'Vita Legal', 'Apex Jurídico', 'Sólida Advocacia', 'Praxis Legal', 'Guerra & Silva'],
-    'Restaurante': ['Mesa & Brasa', 'Sabor do Centro', 'Bistro do Bairro', 'Ponto Gourmet', 'Casa da Praça', 'Aroma & Co', 'The Table', 'Sabor Local', 'Bistrô Vitta', 'Canto Vivo'],
-    'Academia': ['Energia Fit', 'Body One', 'Vita Performance', 'Elite Pulse', 'Gym Forte', 'Nexxus Training', 'Ação Fit', 'Vitalidade Club', 'Impacto Gym', 'Motion Lab'],
-    'Pet shop': ['Pet Life', 'Mundo Pet', 'Paw & Co', 'Dog & Cat', 'Happy Pets', 'Pet House', 'Fofura Pet', 'Bichos & Cia', 'Pata e Pêlo', 'Luiz Pet'],
-    'Salão de beleza': ['Beauty Lab', 'Studio Beleza', 'Aurea Hair', 'Color & Style', 'Glow Studio', 'Lumin Beauty', 'Arte do Cabelo', 'Bela Forma', 'Vogue Hair', 'Atena Beauty'],
-    'Contabilidade': ['Contábil Mais', 'Nexos Contábil', 'Assessoria Central', 'Valore Contábil', 'Apex Contábil', 'Nobre Fiscal', 'Prisma Gestão', 'Top Contabilidade', 'Balance Contábil', 'Ação Assessoria'],
-    'Oficina mecânica': ['Auto Center', 'Moto & Cia', 'Mecânica Premium', 'Torque Auto', 'Veloz Oficina', 'Caminho Auto', 'Reset Mecanica', 'Performance Garage', 'Mão na Roda', 'Prime Auto'],
-    'Fotografia': ['Luz & Frame', 'Pixel Atelier', 'Mirante Fotografia', 'Estúdio Nobre', 'Cenas & Luz', 'Foco Vivo', 'Brilho Studio', 'Lente Forma', 'Momento Real', 'Auralight'],
+const OSM_FILTERS: Record<string, string[]> = {
+  'Barbearia': ['["shop"="hairdresser"]["hairdresser"="barber"]'],
+  'Imobiliária': ['["office"="estate_agent"]'],
+  'Clínica de estética': ['["shop"="beauty"]', '["healthcare"="clinic"]["healthcare:speciality"="aesthetic"]'],
+  'Odontologia': ['["amenity"="dentist"]'],
+  'Advocacia': ['["office"="lawyer"]'],
+  'Restaurante': ['["amenity"="restaurant"]'],
+  'Academia': ['["leisure"="fitness_centre"]'],
+  'Pet shop': ['["shop"="pet"]'],
+  'Salão de beleza': ['["shop"="hairdresser"]', '["shop"="beauty"]'],
+  'Contabilidade': ['["office"="accountant"]'],
+  'Oficina mecânica': ['["shop"="car_repair"]'],
+  'Fotografia': ['["shop"="photo"]', '["craft"="photographer"]'],
+  'Psicologia': ['["healthcare"="psychotherapist"]', '["office"="therapist"]'],
+  'Consultoria': ['["office"="consulting"]'],
+  'Lavanderia': ['["shop"="laundry"]'],
+  'Design de interiores': ['["office"="interior_design"]'],
+  'Seguros': ['["office"="insurance"]'],
+  'Hotel': ['["tourism"="hotel"]'],
+  'Auto Center': ['["shop"="car_repair"]', '["shop"="tyres"]'],
+  'Agência de marketing': ['["office"="advertising_agency"]'],
+};
+
+function osmPhone(tags: Record<string, string>) {
+  return tags.phone || tags['contact:phone'] || tags.mobile || tags['contact:mobile'] || '';
+}
+
+function osmAddress(tags: Record<string, string>, city: string, state: string) {
+  const street = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(', ');
+  const district = tags['addr:suburb'] || tags['addr:district'];
+  return [street, district, tags['addr:city'] || city, state].filter(Boolean).join(' · ');
+}
+
+async function fetchNominatimBusinesses(profession: string, city: string, state: string, location: NominatimResult) {
+  const terms: Record<string, string> = {
+    'Clínica de estética': 'estética', 'Salão de beleza': 'salão de beleza', 'Oficina mecânica': 'oficina mecânica',
+    'Design de interiores': 'design de interiores', 'Agência de marketing': 'agência de marketing', 'Auto Center': 'auto center',
   };
-
-  const names = baseNames[profession as keyof typeof baseNames] ?? ['Negócio Local', 'Atelier Local', 'Empresa Vizinhança', 'Foco & Valor', 'Vila Mais', 'Ponto Alto', 'Eixo Business', 'Comunidade Prime', 'Nexo Local', 'Ação Vida'];
-
-  const expanded = [...names];
-  for (let index = 0; index < 50; index += 1) {
-    const base = names[index % names.length];
-    const suffix = index < names.length ? '' : ` ${index + 1}`;
-    expanded.push(`${base}${suffix}`);
+  const params: Record<string, string> = {
+    q: `${terms[profession] || profession}, ${city}, ${state}, Brasil`, format: 'jsonv2', countrycodes: 'br',
+    addressdetails: '1', extratags: '1', limit: '40',
+  };
+  if (location.boundingbox) {
+    const [south, north, west, east] = location.boundingbox;
+    params.viewbox = `${west},${north},${east},${south}`;
+    params.bounded = '1';
   }
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${new URLSearchParams(params)}`, {
+    headers: { 'User-Agent': 'LeadStudio/1.0 (business-discovery)' },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok) return [];
+  const results = await response.json() as NominatimResult[];
+  const ignoredTypes = new Set(['footway', 'road', 'residential', 'administrative', 'city', 'town', 'village']);
+  return results
+    .filter((item) => item.osm_type && item.osm_id && item.name && !ignoredTypes.has(item.type || ''))
+    .filter((item) => !item.extratags?.website && !item.extratags?.['contact:website'])
+    .map((item) => ({
+      id: `osm-${item.osm_type}-${item.osm_id}`,
+      name: item.name as string,
+      rating: null,
+      reviewCount: null,
+      address: item.display_name || `${city} · ${state}`,
+      phone: item.extratags?.phone || item.extratags?.['contact:phone'] || '',
+      website: null,
+      mapsUrl: `https://www.openstreetmap.org/${item.osm_type}/${item.osm_id}`,
+      source: 'openstreetmap' as const,
+    }));
+}
 
-  return expanded.slice(0, 50).map((name, index) => ({
-    id: `fallback-${profession}-${index}-${city}`,
-    name,
-    rating: Number((4.6 + ((index % 10) * 0.08)).toFixed(1)),
-    reviewCount: 90 + index * 18 + (city.length % 10) * 8,
-    address: `${name} • ${city}, ${state}`,
-    phone: `+55 11 9${String(2000 + index * 97).padStart(5, '0')}-${String(1000 + index * 79).slice(0, 4)}`,
-    website: null,
-    mapsUrl: `https://maps.google.com/?q=${encodeURIComponent(`${name} ${city}`)}`,
-    source: 'google' as const,
-  }));
+async function fetchOpenStreetMap(profession: string, city: string, state: string) {
+  const locationResponse = await fetch(`https://nominatim.openstreetmap.org/search?${new URLSearchParams({
+    q: `${city}, ${state}, Brasil`, format: 'jsonv2', countrycodes: 'br', limit: '1',
+  })}`, {
+    headers: { 'User-Agent': 'LeadStudio/1.0 (business-discovery)' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!locationResponse.ok) throw new Error('Não foi possível localizar a cidade.');
+  const [location] = await locationResponse.json() as NominatimResult[];
+  if (!location?.lat || !location.lon) return [];
+
+  const radius = profession === 'Barbearia' || profession === 'Salão de beleza' ? 3000 : 6000;
+  const searchArea = `around:${radius},${location.lat},${location.lon}`;
+  const filters = OSM_FILTERS[profession] ?? [];
+  const query = `[out:json][timeout:6];(${filters.map((filter) => `node${filter}["name"](${searchArea});`).join('')});out tags 100;`;
+  const endpoints = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter'];
+  let elements: OsmElement[] = [];
+  let providerResponded = false;
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, {
+        headers: { 'User-Agent': 'LeadStudio/1.0 (business-discovery)' },
+        signal: AbortSignal.timeout(7_000),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json() as { elements?: OsmElement[] };
+      elements = payload.elements ?? [];
+      providerResponded = true;
+      break;
+    } catch { /* Try the next public Overpass endpoint. */ }
+  }
+  if (!providerResponded) return fetchNominatimBusinesses(profession, city, state, location);
+
+  return elements
+    .filter((element) => element.tags?.name)
+    .filter((element) => profession !== 'Barbearia' || /barbear|barber/i.test(element.tags?.name ?? ''))
+    .filter((element) => {
+      const tags = element.tags ?? {};
+      return !tags.website && !tags['contact:website'] && !tags.url && tags.disused !== 'yes';
+    })
+    .map((element) => {
+      const tags = element.tags ?? {};
+      const phone = osmPhone(tags);
+      return {
+        id: `osm-${element.type}-${element.id}`,
+        name: tags.name,
+        rating: null,
+        reviewCount: null,
+        address: osmAddress(tags, city, state),
+        phone,
+        website: null,
+        mapsUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+        source: 'openstreetmap' as const,
+      };
+    })
+    .sort((a, b) => Number(Boolean(b.phone)) - Number(Boolean(a.phone)) || a.name.localeCompare(b.name, 'pt-BR'))
+    .slice(0, 50);
 }
 
 function secureJson(data: unknown, status = 200) {
@@ -248,11 +361,11 @@ export async function POST(request: NextRequest) {
       return secureJson({ error: 'Muitas pesquisas em pouco tempo. Aguarde um minuto e tente novamente.' }, 429);
     }
 
-    const body = await request.json();
-    const profession = cleanText(body.profession);
-    const city = cleanText(body.city);
-    const state = cleanText(body.state, 60);
-    const minReviews = Math.max(20, Math.min(500, Number(body.minReviews) || 30));
+    const body = (await request.json()) as Record<string, unknown> | null;
+    const profession = cleanText(body?.profession);
+    const city = cleanText(body?.city);
+    const state = cleanText(body?.state, 60);
+    const minReviews = Math.max(20, Math.min(500, Number(body?.minReviews) || 30));
 
     if (!ALLOWED_PROFESSIONS.has(profession) || !/^[\p{L} .'-]{2,120}$/u.test(city) || !/^[\p{L} .'-]{2,60}$/u.test(state)) {
       return secureJson({ error: 'Os filtros informados não são válidos.' }, 400);
@@ -260,14 +373,14 @@ export async function POST(request: NextRequest) {
 
     const apiKeys = getGoogleKeys();
     if (!apiKeys.length) {
-      const leads = buildFallbackLeads(profession, city, state)
-        .filter((lead) => lead.reviewCount >= Math.max(20, minReviews * 0.4))
-        .sort((a, b) => b.reviewCount - a.reviewCount || b.rating - a.rating);
+      const leads = await fetchOpenStreetMap(profession, city, state);
 
       return secureJson({
         leads,
-        mode: 'demo',
-        notice: `Google Places não configurado. Mostrando oportunidades de demonstração para ${city}/${state}.`,
+        mode: 'openstreetmap',
+        notice: leads.length
+          ? `${leads.length} negócios reais do OpenStreetMap sem site informado na fonte. Contatos informados aparecem primeiro.`
+          : `Nenhum negócio sem site informado foi encontrado em ${city}/${state} nessa fonte pública.`,
       });
     }
 

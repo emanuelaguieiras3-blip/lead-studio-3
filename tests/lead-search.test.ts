@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFallbackLeads, buildSearchQueries, filterLeadCandidates } from '../app/api/leads/route.ts';
+import { buildSearchQueries, filterLeadCandidates } from '../app/api/leads/route.ts';
 
 test('buildSearchQueries creates broader city-specific searches', () => {
   const queries = buildSearchQueries('Barbearia', 'São Paulo', 'São Paulo');
@@ -53,17 +53,3 @@ test('filterLeadCandidates keeps real businesses with phone and local reputation
   assert.equal(leads[0].id, '1');
 });
 
-test('buildFallbackLeads returns a usable set of local businesses when Google keys are absent', () => {
-  const fallback = buildFallbackLeads('Barbearia', 'São Paulo', 'São Paulo');
-
-  assert.ok(fallback.length >= 3);
-  assert.ok(fallback.every((lead) => lead.phone.includes('+55')));
-  assert.ok(fallback[0].rating >= 4.6);
-});
-
-test('buildFallbackLeads supports a larger opportunity volume for the dashboard', () => {
-  const fallback = buildFallbackLeads('Barbearia', 'São Paulo', 'São Paulo');
-
-  assert.ok(fallback.length >= 50);
-  assert.ok(fallback.every((lead) => lead.name.length > 0));
-});
