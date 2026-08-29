@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lead Studio - Componentes e Estrutura</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f3ed; color: #171713; line-height: 1.6; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 40px 20px; }
+    h1 { font-size: 2.5em; margin: 40px 0 10px; color: #171713; border-bottom: 3px solid #d8ff57; padding-bottom: 10px; }
+    h2 { font-size: 1.8em; margin: 30px 0 15px; color: #20201d; }
+    h3 { font-size: 1.3em; margin: 20px 0 10px; color: #35362f; }
+    .section { background: #fff; padding: 30px; margin: 20px 0; border-radius: 12px; box-shadow: 0 4px 12px rgba(20,20,18,.08); }
+    .component { background: #f8f7f2; padding: 20px; margin: 15px 0; border-left: 4px solid #d8ff57; border-radius: 8px; }
+    .code-block { background: #23231e; color: #d8ff57; padding: 15px; border-radius: 8px; overflow-x: auto; font-family: 'Courier New', monospace; font-size: 12px; margin: 10px 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .tag { display: inline-block; background: #d8ff57; color: #171713; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; margin: 2px; }
+    ul, ol { margin-left: 20px; margin-bottom: 15px; }
+    li { margin-bottom: 8px; }
+    .highlight { background: #fff4e5; padding: 15px; border-radius: 8px; border-left: 4px solid #d9a233; }
+    .success { background: #eaf4df; border-left-color: #78b93b; }
+    .info { background: #e3f2fd; border-left-color: #1976d2; }
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #deded5; }
+    th { background: #f0efe9; font-weight: bold; }
+    tr:hover { background: #f9f8f4; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎨 Lead Studio - Componentes e Estrutura HTML/React</h1>
+    
+    <div class="section info highlight">
+      <h3>📊 Visão Geral</h3>
+      <p><strong>Framework:</strong> Next.js 16.2.6 + React 19.2.6</p>
+      <p><strong>Linguagem:</strong> TypeScript</p>
+      <p><strong>Build:</strong> Vinext + Vite 8.0.13</p>
+      <p><strong>Deploy:</strong> Cloudflare Pages com Workers</p>
+    </div>
+
+    <h1>📁 Estrutura de Arquivos</h1>
+    <div class="section">
+      <div class="code-block">app/
+├── layout.tsx          (Layout raiz com metadados)
+├── page.tsx           (Dashboard principal - Cliente)
+├── globals.css        (Estilos globais - Tailwind + CSS)
+├── api/
+│   ├── leads/
+│   │   └── route.ts   (API: Busca de negócios via Google Places)
+│   └── generate/
+│       └── route.ts   (API: Geração de prompts com IA)
+├── dashboard/
+│   └── page.tsx       (Rota: Dashboard)
+├── oportunidades/
+│   └── page.tsx       (Rota: Oportunidades)
+├── briefs/
+│   └── page.tsx       (Rota: Briefs/Prompts)
+└── insights/
+    └── page.tsx       (Rota: Insights)</div>
+    </div>
+
+    <h1>🏗️ Componentes Principais</h1>
+    
+    <h2>1. Layout Root (layout.tsx)</h2>
+    <div class="section">
+      <div class="component">
+        <h3>Função:</h3>
+        <p>Layout raiz da aplicação com metadados SEO e fontes do Google</p>
+        
+        <h3>Props:</h3>
+        <ul>
+          <li><strong>children:</strong> React.ReactNode - Conteúdo das páginas</li>
+        </ul>
+
+        <h3>Metadados:</h3>
+        <ul>
+          <li>Título: "Lead Studio — oportunidades sem site"</li>
+          <li>Descrição: "Encontre negócios sem site, priorize avaliações e gere um prompt premium"</li>
+          <li>Open Graph para compartilhamento</li>
+          <li>Twitter Card configurado</li>
+          <li>Imagem OG: /og.png (1200x630px)</li>
+        </ul>
+
+        <h3>Fontes:</h3>
+        <span class="tag">Geist Sans</span>
+        <span class="tag">Geist Mono</span>
+
+        <div class="highlight success">
+          <strong>✅ Funcionalidade:</strong> Renderiza HTML semântico com metadados para SEO e compartilhamento social
+        </div>
+      </div>
+    </div>
+
+    <h2>2. Dashboard Principal (page.tsx)</h2>
+    <div class="section">
+      <div class="component">
+        <h3>Função:</h3>
+        <p>Interface interativa principal com filtros, busca de leads e geração de prompts</p>
+
+        <h3>Estados (useState):</h3>
+        <table>
+          <tr>
+            <th>Estado</th>
+            <th>Tipo</th>
+            <th>Descrição</th>
+          </tr>
+          <tr>
+            <td>professionId</td>
+            <td>string</td>
+            <td>ID da profissão selecionada</td>
+          </tr>
+          <tr>
+            <td>stateId</td>
+            <td>string</td>
+            <td>ID do estado (UF) selecionado</td>
+          </tr>
+          <tr>
+            <td>city</td>
+            <td>string</td>
+            <td>Cidade selecionada</td>
+          </tr>
+          <tr>
+            <td>minReviews</td>
+            <td>string</td>
+            <td>Filtro mínimo de avaliações</td>
+          </tr>
+          <tr>
+            <td>leads</td>
+            <td>Lead[]</td>
+            <td>Lista de negócios encontrados</td>
+          </tr>
+          <tr>
+            <td>selectedLead</td>
+            <td>Lead | null</td>
+            <td>Lead atualmente selecionado</td>
+          </tr>
+          <tr>
+            <td>generatedBrief</td>
+            <td>string</td>
+            <td>Prompt gerado pela IA</td>
+          </tr>
+          <tr>
+            <td>activeAi</td>
+            <td>string</td>
+            <td>Provedor de IA ativo</td>
+          </tr>
+        </table>
+
+        <h3>Profissões Disponíveis (20):</h3>
+        <div class="grid-3">
+          <div class="component">
+            <span class="tag">✂ Barbearia</span>
+            <p>Cortes, barba, agendamento</p>
+          </div>
+          <div class="component">
+            <span class="tag">⌂ Imobiliária</span>
+            <p>Imóveis, venda, locação</p>
+          </div>
+          <div class="component">
+            <span class="tag">✦ Clínica de estética</span>
+            <p>Procedimentos, bem-estar</p>
+          </div>
+          <div class="component">
+            <span class="tag">◌ Odontologia</span>
+            <p>Saúde bucal, estética</p>
+          </div>
+          <div class="component">
+            <span class="tag">§ Advocacia</span>
+            <p>Jurídico, expertise</p>
+          </div>
+          <div class="component">
+            <span class="tag">◉ Restaurante</span>
+            <p>Gastronomia, reservas</p>
+          </div>
+          <div class="component">
+            <span class="tag">↗ Academia</span>
+            <p>Performance, modalidades</p>
+          </div>
+          <div class="component">
+            <span class="tag">♡ Pet shop</span>
+            <p>Cuidado animal, tosa</p>
+          </div>
+          <div class="component">
+            <span class="tag">◇ Salão de beleza</span>
+            <p>Cabelo, unhas, maquiagem</p>
+          </div>
+          <div class="component">
+            <span class="tag">▦ Contabilidade</span>
+            <p>Fiscal, folha, consultoria</p>
+          </div>
+          <div class="component">
+            <span class="tag">⚙ Oficina mecânica</span>
+            <p>Manutenção, diagnóstico</p>
+          </div>
+          <div class="component">
+            <span class="tag">□ Fotografia</span>
+            <p>Portfólio, eventos</p>
+          </div>
+          <div class="component">
+            <span class="tag">◈ Psicologia</span>
+            <p>Terapia, acolhimento</p>
+          </div>
+          <div class="component">
+            <span class="tag">▣ Consultoria</span>
+            <p>Estratégia, crescimento</p>
+          </div>
+          <div class="component">
+            <span class="tag">✧ Lavanderia</span>
+            <p>Limpeza, praticidade</p>
+          </div>
+          <div class="component">
+            <span class="tag">▤ Design de interiores</span>
+            <p>Ambientes, projetos</p>
+          </div>
+          <div class="component">
+            <span class="tag">▨ Seguros</span>
+            <p>Proteção, tranquilidade</p>
+          </div>
+          <div class="component">
+            <span class="tag">✺ Hotel</span>
+            <p>Hospedagem, experiência</p>
+          </div>
+          <div class="component">
+            <span class="tag">⟡ Auto Center</span>
+            <p>Veículos, manutenção</p>
+          </div>
+          <div class="component">
+            <span class="tag">✹ Agência de marketing</span>
+            <p>Estratégia digital, branding</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>3. API Routes</h2>
+    
+    <div class="section">
+      <h3>3.1 POST /api/leads</h3>
+      <div class="component">
+        <h3>Função:</h3>
+        <p>Busca negócios sem site via Google Places API, com fallback para 50 oportunidades simuladas</p>
+
+        <h3>Request Body:</h3>
+        <div class="code-block">{
+  "profession": "Barbearia",
+  "city": "São Paulo",
+  "state": "São Paulo",
+  "minReviews": 30
+}</div>
+
+        <h3>Response:</h3>
+        <div class="code-block">{
+  "leads": [
+    {
+      "id": "lead-id-1",
+      "name": "Barbearia Nova Era",
+      "rating": 4.8,
+      "reviewCount": 142,
+      "address": "Rua..., São Paulo, SP",
+      "phone": "+55 11 9xxxx-xxxx",
+      "website": null,
+      "mapsUrl": "https://maps.google.com/...",
+      "source": "google"
+    }
+  ],
+  "mode": "google" | "fallback",
+  "notice": "Analisando negócios..."
+}</div>
+
+        <h3>Funcionalidades:</h3>
+        <ul>
+          <li>Integração com Google Places API (5 chaves rotativas)</li>
+          <li>Filtra negócios sem site</li>
+          <li>Ordena por avaliações e rating</li>
+          <li>Fallback automático com 50 negócios simulados</li>
+          <li>Rate limiting por IP</li>
+          <li>Verificação de origem confiável</li>
+          <li>Lida com 12 profissões diferentes</li>
+        </ul>
+      </div>
+
+      <h3>3.2 POST /api/generate</h3>
+      <div class="component">
+        <h3>Função:</h3>
+        <p>Gera prompts premium personalizados por profissão via Gemini/OpenAI</p>
+
+        <h3>Request Body:</h3>
+        <div class="code-block">{
+  "business": "Barbearia Nova Era",
+  "segment": "Barbearia",
+  "audience": "clientes locais",
+  "objective": "aumentar agendamentos",
+  "tone": "elegante",
+  "city": "São Paulo",
+  "state": "São Paulo",
+  "leadName": "Barbearia Nova Era",
+  "engine": "gemini" | "openai" | "local"
+}</div>
+
+        <h3>Response:</h3>
+        <div class="code-block">{
+  "prompt": "Crie um site premium de nível Aether1...",
+  "plan": {
+    "headline": "Barbearia Nova Era: cortes que definem o seu estilo",
+    "palette": {
+      "primary": "#25231f",
+      "accent": "#a9bf46",
+      "background": "#f4f0e7"
+    }
+  },
+  "mode": "gemini" | "local",
+  "notice": "Brief gerado com Gemini"
+}</div>
+
+        <h3>Funcionalidades:</h3>
+        <ul>
+          <li>Prompts específicos por profissão</li>
+          <li>Suporta Gemini, OpenAI e geração local</li>
+          <li>Personalização por lead selecionado</li>
+          <li>Paleta de cores adaptada ao segmento</li>
+          <li>Inclui estratégia de negócio customizada</li>
+          <li>Copy premium e não-genérica</li>
+        </ul>
+      </div>
+    </div>
+
+    <h1>🎯 Funcionalidades Principais</h1>
+    <div class="section">
+      <h3>1. Seleção de Profissão</h3>
+      <div class="component">
+        <p>Grid de 3 colunas com 20 profissões diferentes, cada uma com ícone, etiqueta e descrição de serviços.</p>
+        <ul>
+          <li>Hover effect com transformação visual</li>
+          <li>Estado ativo com gradiente preto</li>
+          <li>Ícone em cor lima quando ativo</li>
+        </ul>
+      </div>
+
+      <h3>2. Filtro Geográfico</h3>
+      <div class="component">
+        <p>Seleção em cascata: Estado → Cidade</p>
+        <ul>
+          <li>27 estados brasileiros</li>
+          <li>Cidades carregadas dinamicamente via IBGE API</li>
+          <li>Dropdown com busca</li>
+        </ul>
+      </div>
+
+      <h3>3. Filtro de Avaliações</h3>
+      <div class="component">
+        <p>Seletor numérico para mínimo de reviews desejados</p>
+        <ul>
+          <li>Padrão: 30 reviews</li>
+          <li>Range: 15 a 500</li>
+        </ul>
+      </div>
+
+      <h3>4. Busca de Leads</h3>
+      <div class="component">
+        <p>Botão que dispara busca na API /api/leads</p>
+        <ul>
+          <li>Loading state com spinner</li>
+          <li>Resultados ordenados por rating e reviews</li>
+          <li>Suporta 50 oportunidades em fallback</li>
+          <li>Mostra mensagem de status</li>
+        </ul>
+      </div>
+
+      <h3>5. Lista de Leads</h3>
+      <div class="component">
+        <p>Cards interativos com informações do negócio</p>
+        <ul>
+          <li>Nome e endereço truncados</li>
+          <li>Rating em estrelas</li>
+          <li>Número de avaliações</li>
+          <li>Telefone com botão de cópia</li>
+          <li>Link para Google Maps</li>
+          <li>Badge "sem site"</li>
+          <li>Seleção com borda destacada</li>
+        </ul>
+      </div>
+
+      <h3>6. Geração de Prompts IA</h3>
+      <div class="component">
+        <p>Botões para diferentes provedores de IA</p>
+        <ul>
+          <li>Gemini (padrão)</li>
+          <li>Cursor</li>
+          <li>Codex</li>
+          <li>Loading state durante geração</li>
+          <li>Prompt customizado por profissão</li>
+        </ul>
+      </div>
+
+      <h3>7. Painel de Prompt</h3>
+      <div class="component">
+        <p>Exibe o prompt gerado ou padrão</p>
+        <ul>
+          <li>Texto expandido com scroll</li>
+          <li>Botão "Copiar para Gemini/Cursor/Codex"</li>
+          <li>Feedback visual após cópia</li>
+          <li>Formatação clara e legível</li>
+        </ul>
+      </div>
+
+      <h3>8. Ranking de IA</h3>
+      <div class="component">
+        <p>Tabela comparativa de provedores</p>
+        <ul>
+          <li>Gemini: 9.8 - Brief gerado no site</li>
+          <li>Codex: 9.4 - Implementação e refinamento</li>
+          <li>Cursor: 9.2 - Fluxo de prototipagem</li>
+          <li>Claude: 9.1 - Refino e estratégia</li>
+          <li>ChatGPT: 9.0 - Copy e roteiro</li>
+          <li>OpenAI: 8.9 - Versão premium</li>
+        </ul>
+      </div>
+    </div>
+
+    <h1>🎨 Sistema de Design (CSS)</h1>
+    <div class="section">
+      <div class="grid-2">
+        <div class="component">
+          <h3>Paleta de Cores</h3>
+          <ul>
+            <li><strong>--ink:</strong> #171713 (texto escuro)</li>
+            <li><strong>--lime:</strong> #d8ff57 (destaque)</li>
+            <li><strong>--paper:</strong> #f4f3ed (fundo)</li>
+            <li><strong>--panel:</strong> #fff (painéis)</li>
+            <li><strong>--line:</strong> #deded5 (bordas)</li>
+            <li><strong>--accent:</strong> #b7d13d (secundária)</li>
+          </ul>
+        </div>
+
+        <div class="component">
+          <h3>Layout Grid</h3>
+          <ul>
+            <li>Rail: 72px (sidebar esquerdo)</li>
+            <li>Dashboard: 2 colunas (filtros + leads)</li>
+            <li>AI Panel + Prompt Panel</li>
+            <li>Responsivo com media queries</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="component" style="margin-top: 20px;">
+        <h3>Componentes UI</h3>
+        <ul>
+          <li><strong>.rail:</strong> Sidebar esquerdo com navegação</li>
+          <li><strong>.brand-mark:</strong> Logo "L" com gradiente</li>
+          <li><strong>.topbar:</strong> Barra superior com título</li>
+          <li><strong>.filters-panel:</strong> Filtros de busca</li>
+          <li><strong>.leads-panel:</strong> Lista de leads</li>
+          <li><strong>.ai-panel:</strong> Seletor de IA</li>
+          <li><strong>.prompt-panel:</strong> Exibição de prompt</li>
+          <li><strong>.profession:</strong> Grid de profissões</li>
+          <li><strong>.lead-row:</strong> Card individual de lead</li>
+          <li><strong>.contact-bar:</strong> Barra de contato do lead</li>
+        </ul>
+      </div>
+    </div>
+
+    <h1>📱 Responsividade</h1>
+    <div class="section">
+      <div class="highlight success">
+        <h3>✅ Mobile First</h3>
+        <ul>
+          <li>Breakpoints fluidos com clamp()</li>
+          <li>Grid que se adapta a diferentes telas</li>
+          <li>Touch-friendly com tap targets de 42px+</li>
+          <li>Sem scroll horizontal</li>
+          <li>Tipografia escalonada com vw units</li>
+        </ul>
+      </div>
+    </div>
+
+    <h1>🚀 Performance e Otimizações</h1>
+    <div class="section">
+      <div class="highlight success">
+        <ul>
+          <li><strong>Image Optimization:</strong> Next.js Image componente</li>
+          <li><strong>Code Splitting:</strong> Route-based com App Router</li>
+          <li><strong>Lazy Loading:</strong> Componentes carregados conforme necessário</li>
+          <li><strong>Caching:</strong> Rate limiting por IP, cache do Google Places</li>
+          <li><strong>SSR/SSG:</strong> Renderização no servidor com Vinext</li>
+          <li><strong>Bundle Size:</strong> Otimizado para Cloudflare Pages</li>
+        </ul>
+      </div>
+    </div>
+
+    <h1>🔐 Segurança</h1>
+    <div class="section">
+      <div class="highlight">
+        <ul>
+          <li><strong>CORS:</strong> Verificação de origem confiável</li>
+          <li><strong>Rate Limiting:</strong> 8 requisições por minuto por IP</li>
+          <li><strong>API Keys:</strong> 5 chaves rotativas do Google Places</li>
+          <li><strong>Content Security:</strong> Headers de segurança configurados</li>
+          <li><strong>Input Validation:</strong> Sanitização de profissão, cidade, estado</li>
+          <li><strong>Error Handling:</strong> Mensagens de erro seguras em produção</li>
+        </ul>
+      </div>
+    </div>
+
+    <h1>📊 Dados Estatísticos</h1>
+    <div class="section">
+      <table>
+        <tr>
+          <th>Métrica</th>
+          <th>Valor</th>
+        </tr>
+        <tr>
+          <td>Profissões Suportadas</td>
+          <td>20</td>
+        </tr>
+        <tr>
+          <td>Estados Brasileiros</td>
+          <td>27</td>
+        </tr>
+        <tr>
+          <td>Leads em Fallback</td>
+          <td>50 por busca</td>
+        </tr>
+        <tr>
+          <td>IA Providers</td>
+          <td>6 (Gemini, OpenAI, Codex, Cursor, Claude, ChatGPT)</td>
+        </tr>
+        <tr>
+          <td>Google API Keys</td>
+          <td>5 rotativas</td>
+        </tr>
+        <tr>
+          <td>Rate Limit</td>
+          <td>8 req/min por IP</td>
+        </tr>
+        <tr>
+          <td>Linhas de Código (App)</td>
+          <td>~2000 (TypeScript + CSS)</td>
+        </tr>
+      </table>
+    </div>
+
+    <h1>✨ Site Publicado</h1>
+    <div class="section highlight success">
+      <h2>🌍 https://lead-studio.pages.dev</h2>
+      <p><strong>Status:</strong> ✅ Online e Público</p>
+      <p><strong>Deploy:</strong> Cloudflare Pages com Node.js Runtime</p>
+      <p><strong>APIs Ativas:</strong> /api/leads, /api/generate</p>
+      <p><strong>Funcionalidades:</strong> 100% operacionais</p>
+    </div>
+
+  </div>
+</body>
+</html>
