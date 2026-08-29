@@ -4,13 +4,17 @@ import { useEffect, useMemo, useState } from 'react';
 
 type StateOption = { id: number; sigla: string; nome: string };
 type CityOption = { id: number; nome: string };
-type SitePlan = {
-  headline: string;
-  subheadline: string;
-  cta: string;
-  benefits: string[];
-  tone: string;
-  palette: { primary: string; accent: string; background: string };
+type Profession = { id: string; label: string; icon: string; style: string; services: string };
+type Lead = {
+  id: string;
+  name: string;
+  rating: number;
+  reviewCount: number;
+  address: string;
+  phone: string;
+  website: null;
+  mapsUrl: string;
+  source: 'google' | 'demo';
 };
 
 const states: StateOption[] = [
@@ -30,27 +34,78 @@ const states: StateOption[] = [
   { id: 17, sigla: 'TO', nome: 'Tocantins' },
 ];
 
-const agents = [
-  ['✦', 'Criador de sites', 'Ativo'], ['◎', 'Estrategista', 'Briefing'],
-  ['T', 'Copywriter', 'Textos'], ['◫', 'Designer', 'Visual'], ['↗', 'SEO local', 'Busca'],
+const professions: Profession[] = [
+  { id: 'barbearia', label: 'Barbearia', icon: '✂', style: 'masculino sofisticado, editorial, grafite, creme e cobre', services: 'cortes, barba, tratamentos e agendamento' },
+  { id: 'imobiliaria', label: 'Imobiliária', icon: '⌂', style: 'arquitetônico premium, muito espaço em branco, azul profundo e areia', services: 'imóveis em destaque, venda, locação e avaliação' },
+  { id: 'estetica', label: 'Clínica de estética', icon: '✦', style: 'elegante, acolhedor, tons naturais e fotografia luminosa', services: 'procedimentos, benefícios, equipe e avaliação' },
+  { id: 'odontologia', label: 'Odontologia', icon: '◌', style: 'clínico contemporâneo, branco, azul petróleo e formas suaves', services: 'especialidades, equipe, estrutura e consulta' },
+  { id: 'advocacia', label: 'Advocacia', icon: '§', style: 'sóbrio, editorial, tipografia clássica e detalhes dourados discretos', services: 'áreas de atuação, equipe e atendimento confidencial' },
+  { id: 'restaurante', label: 'Restaurante', icon: '◉', style: 'sensorial, fotografia grande, tipografia expressiva e cores quentes', services: 'cardápio, reservas, ambiente e localização' },
+  { id: 'academia', label: 'Academia', icon: '↗', style: 'energético, contraste alto, preto, branco e verde vibrante', services: 'modalidades, planos, professores e aula experimental' },
+  { id: 'petshop', label: 'Pet shop', icon: '♡', style: 'amigável, colorido sofisticado e ilustrações leves', services: 'banho e tosa, produtos, veterinária e agendamento' },
+  { id: 'beleza', label: 'Salão de beleza', icon: '◇', style: 'fashion, delicado, editorial e sofisticado', services: 'cabelo, unhas, maquiagem e reservas' },
+  { id: 'contabilidade', label: 'Contabilidade', icon: '▦', style: 'confiável, objetivo, azul marinho e verde discreto', services: 'abertura de empresa, fiscal, folha e consultoria' },
+  { id: 'oficina', label: 'Oficina mecânica', icon: '⚙', style: 'industrial refinado, grafite, branco e laranja', services: 'revisão, manutenção, diagnóstico e orçamento' },
+  { id: 'fotografia', label: 'Fotografia', icon: '□', style: 'portfólio minimalista, imagens imersivas e tipografia autoral', services: 'portfólio, ensaios, eventos e orçamento' },
 ];
 
+const aiRanking = [
+  { rank: 1, name: 'Lovable', kind: 'Site completo', score: '9.6', color: '#ff6b58', url: 'https://lovable.dev', reason: 'Mais direto para transformar um prompt em site visual e publicável.' },
+  { rank: 2, name: 'Claude', kind: 'Código e refinamento', score: '9.3', color: '#d39a72', url: 'https://claude.ai', reason: 'Excelente para código, arquitetura e acabamento por etapas.' },
+  { rank: 3, name: 'Kimi', kind: 'Agente de código', score: '8.8', color: '#6f7cff', url: 'https://www.kimi.com', reason: 'Bom contexto longo e execução de tarefas de desenvolvimento.' },
+  { rank: 4, name: 'DeepSeek', kind: 'Custo e controle', score: '8.4', color: '#4b8cff', url: 'https://chat.deepseek.com', reason: 'Boa opção econômica para gerar e revisar código.' },
+];
+
+function buildPrompt(lead: Lead | null, profession: Profession, city: string, uf: string) {
+  const business = lead?.name ?? `uma ${profession.label.toLowerCase()} em ${city}`;
+  const proof = lead ? `${lead.rating.toFixed(1)} estrelas e ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas` : 'boa reputação local';
+  return `Crie um site completo, premium e altamente profissional para ${business}, uma empresa de ${profession.label} em ${city}/${uf}.
+
+OBJETIVO
+Transformar visitantes locais em contatos pelo WhatsApp e transmitir confiança imediatamente. A empresa ainda não possui site e já tem ${proof}. Use esse dado somente como prova social factual e não invente depoimentos, prêmios, preços, profissionais ou certificações.
+
+DIREÇÃO VISUAL
+Visual ${profession.style}. Evite aparência de template genérico, excesso de gradientes, cartões repetitivos e imagens artificiais. Use hierarquia tipográfica forte, espaçamento generoso, detalhes autorais, microinterações elegantes e fotografias coerentes com o negócio. O resultado deve parecer trabalho de uma agência de design premiada, mas continuar claro e fácil de usar.
+
+ESTRUTURA
+1. Hero impactante com promessa específica, localização e CTA “Falar no WhatsApp”.
+2. Barra de confiança usando a avaliação pública informada.
+3. Seção de ${profession.services}.
+4. Diferenciais com textos concretos, sem promessas falsas.
+5. Galeria visual e seção sobre a empresa com conteúdo editável.
+6. Como funciona em três passos.
+7. FAQ voltado às dúvidas reais de clientes locais.
+8. CTA final, mapa/localização e rodapé completo.
+
+REQUISITOS
+- Mobile first, responsivo, rápido e acessível.
+- SEO local para “${profession.label} em ${city}”.
+- HTML semântico, contraste adequado e navegação por teclado.
+- Botões de WhatsApp com número em placeholder fácil de trocar.
+- Textos em português do Brasil, humanos, específicos e sem clichês.
+- Componentes reutilizáveis e código limpo, pronto para produção.
+- Inclua metadados, favicon, Open Graph e estados de hover/foco.
+
+Entregue o site inteiro com todas as seções, textos e acabamento visual. Quando faltar informação real, use um placeholder claramente identificado em vez de inventar.`;
+}
+
 export default function Home() {
-  const [business, setBusiness] = useState('Clínica Aurora');
-  const [segment, setSegment] = useState('Clínica de estética');
-  const [audience, setAudience] = useState('Mulheres de 25 a 55 anos que buscam autocuidado e resultados naturais.');
+  const [professionId, setProfessionId] = useState('barbearia');
   const [stateId, setStateId] = useState('35');
   const [cities, setCities] = useState<CityOption[]>([]);
   const [city, setCity] = useState('São Paulo');
+  const [minReviews, setMinReviews] = useState('100');
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [loadingCities, setLoadingCities] = useState(false);
-  const [activeAgent, setActiveAgent] = useState(0);
-  const [objective, setObjective] = useState('Receber pedidos de avaliação pelo WhatsApp');
-  const [tone, setTone] = useState('Elegante e acolhedor');
-  const [sitePlan, setSitePlan] = useState<SitePlan | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [generationError, setGenerationError] = useState('');
-  const [engine, setEngine] = useState('auto');
-  const [generationMode, setGenerationMode] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [notice, setNotice] = useState('Faça uma busca para encontrar oportunidades.');
+  const [mode, setMode] = useState<'idle' | 'demo' | 'google'>('idle');
+  const [copied, setCopied] = useState(false);
+
+  const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
+  const profession = useMemo(() => professions.find((item) => item.id === professionId) ?? professions[0], [professionId]);
+  const prompt = useMemo(() => buildPrompt(selectedLead, profession, city, state.sigla), [selectedLead, profession, city, state.sigla]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -59,40 +114,47 @@ export default function Home() {
       .then((response) => response.json())
       .then((data: CityOption[]) => {
         setCities(data);
-        if (!data.some((item) => item.nome === city)) setCity(data[0]?.nome ?? '');
+        setCity((current) => data.some((item) => item.nome === current) ? current : (data[0]?.nome ?? ''));
       })
       .catch((error) => { if (error.name !== 'AbortError') setCities([]); })
       .finally(() => setLoadingCities(false));
     return () => controller.abort();
   }, [stateId]);
 
-  const state = useMemo(() => states.find((item) => String(item.id) === stateId), [stateId]);
-  const headline = sitePlan?.headline ?? `${segment || 'Seu negócio'}, com uma presença que inspira confiança.`;
-  const subheadline = sitePlan?.subheadline ?? audience;
-  const benefits = sitePlan?.benefits ?? ['Experiência personalizada', 'Contato sem fricção', 'Presença que converte'];
+  useEffect(() => {
+    setCopied(false);
+  }, [prompt]);
 
-  async function generateSite() {
-    if (!business.trim() || !segment.trim() || !city) {
-      setGenerationError('Preencha o nome, o segmento e a localização.');
-      return;
-    }
-    setGenerating(true);
-    setGenerationError('');
+  async function searchLeads() {
+    if (!city) return;
+    setSearching(true);
+    setNotice('Analisando negócios sem site e ordenando por avaliações...');
     try {
-      const response = await fetch('/api/generate', {
+      const response = await fetch('/api/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ business, segment, audience, objective, tone, city, state: state?.nome, engine }),
+        body: JSON.stringify({ profession: profession.label, city, state: state.nome, minReviews: Number(minReviews) }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Não foi possível gerar o site.');
-      setSitePlan(data.plan);
-      setGenerationMode(data.mode === 'openai' ? 'Criado com OpenAI' : 'Criado no modo local ilimitado');
+      if (!response.ok) throw new Error(data.error || 'Não foi possível pesquisar.');
+      setLeads(data.leads);
+      setSelectedLead(data.leads[0] ?? null);
+      setMode(data.mode);
+      setNotice(data.notice);
     } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : 'Não foi possível gerar o site.');
+      setLeads([]);
+      setSelectedLead(null);
+      setMode('idle');
+      setNotice(error instanceof Error ? error.message : 'Não foi possível pesquisar.');
     } finally {
-      setGenerating(false);
+      setSearching(false);
     }
+  }
+
+  async function copyPrompt() {
+    await navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
   }
 
   return (
@@ -100,133 +162,112 @@ export default function Home() {
       <aside className="rail">
         <div className="brand-mark" aria-label="Lead Studio">L</div>
         <nav className="rail-nav" aria-label="Navegação principal">
-          <button className="rail-button active" aria-label="Estúdio">✦</button>
-          <button className="rail-button" aria-label="Projetos">▦</button>
-          <button className="rail-button" aria-label="Leads">♙</button>
-          <button className="rail-button" aria-label="Biblioteca">◫</button>
+          <button className="rail-button active" aria-label="Radar">⌁</button>
+          <button className="rail-button" aria-label="Leads">◎</button>
+          <button className="rail-button" aria-label="Prompts">✦</button>
+          <button className="rail-button" aria-label="Projetos">□</button>
         </nav>
-        <button className="rail-button account" aria-label="Sua conta">LM</button>
+        <div className="rail-status" title="Sistema online"><i /></div>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
           <div>
-            <div className="eyebrow"><span className="live-dot" /> AGENTE ONLINE</div>
-            <h1>Lead Studio <span>/ Novo projeto</span></h1>
+            <div className="eyebrow"><span className="live-dot" /> RADAR DE OPORTUNIDADES</div>
+            <h1>Lead Studio <span>/ negócios sem site</span></h1>
           </div>
-          <div className="top-actions">
-            <label className="model-menu"><span>MODELO</span>
-              <select value={engine} onChange={(event) => setEngine(event.target.value)}>
-                <option value="auto">Lead Agent · automático</option>
-                <option value="local">Lead Local · ilimitado</option>
-                <option disabled>Claude · conectar API</option>
-                <option disabled>Cursor · ambiente externo</option>
-              </select>
-            </label>
-            <button className="ghost-button">Salvar rascunho</button>
-            <button className="primary-button" onClick={generateSite} disabled={generating}>{generating ? 'Criando...' : 'Gerar com IA'} <span>↗</span></button>
-          </div>
+          <div className="header-metric"><b>{leads.length}</b><span>leads filtrados</span></div>
         </header>
 
-        <div className="content-grid">
-          <section className="control-panel">
-            <div className="panel-intro">
-              <span className="step-pill">01 — PERFIL</span>
-              <h2>Conte sobre a pessoa ou negócio.</h2>
-              <p>A IA transforma estas respostas em estratégia, texto e visual.</p>
-            </div>
+        <section className="intro">
+          <div>
+            <span className="kicker">PROSPECÇÃO + CRIAÇÃO</span>
+            <h2>Encontre o negócio certo.<br /><em>Crie o site perfeito.</em></h2>
+          </div>
+          <p>Selecione uma profissão e uma cidade. O radar prioriza empresas sem site com muitas avaliações e prepara o prompt para a melhor IA.</p>
+        </section>
 
-            <div className="agent-picker">
-              <div className="section-label">TIME DE IA</div>
-              {agents.map(([icon, name, label], index) => (
-                <button key={name} className={`agent-row ${activeAgent === index ? 'selected' : ''}`} onClick={() => setActiveAgent(index)}>
-                  <span className="agent-icon">{icon}</span>
-                  <span><strong>{name}</strong><small>{label}</small></span>
-                  <span className="agent-check">{activeAgent === index ? '●' : '›'}</span>
+        <div className="dashboard-grid">
+          <section className="filters-panel">
+            <div className="panel-heading"><span>01</span><div><b>Defina a oportunidade</b><small>Profissão, região e reputação mínima</small></div></div>
+
+            <label className="field-label">TIPO DE NEGÓCIO</label>
+            <div className="profession-grid">
+              {professions.map((item) => (
+                <button key={item.id} className={professionId === item.id ? 'profession active' : 'profession'} onClick={() => setProfessionId(item.id)}>
+                  <span>{item.icon}</span>{item.label}
                 </button>
               ))}
             </div>
 
-            <div className="form-card">
-              <label>Nome do negócio
-                <input value={business} onChange={(event) => setBusiness(event.target.value)} placeholder="Ex.: Clínica Aurora" />
-              </label>
-              <label>Segmento
-                <input value={segment} onChange={(event) => setSegment(event.target.value)} placeholder="Ex.: Arquitetura, estética, advocacia" />
-              </label>
-              <div className="field-row">
-                <label>Estado
-                  <select value={stateId} onChange={(event) => setStateId(event.target.value)}>
-                    {states.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
-                  </select>
-                </label>
-                <label>Cidade
-                  <select value={city} onChange={(event) => setCity(event.target.value)} disabled={loadingCities}>
-                    {loadingCities && <option>Carregando...</option>}
-                    {!loadingCities && cities.map((item) => <option key={item.id} value={item.nome}>{item.nome}</option>)}
-                  </select>
-                </label>
-              </div>
-              <label>Público ideal
-                <textarea value={audience} onChange={(event) => setAudience(event.target.value)} rows={3} />
-              </label>
-              <label>Objetivo principal
-                <input value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="Ex.: receber contatos no WhatsApp" />
-              </label>
-              <label>Tom da marca
-                <select value={tone} onChange={(event) => setTone(event.target.value)}>
-                  <option>Elegante e acolhedor</option><option>Direto e comercial</option>
-                  <option>Moderno e ousado</option><option>Técnico e confiável</option>
-                  <option>Leve e próximo</option>
+            <div className="location-fields">
+              <label>Estado
+                <select value={stateId} onChange={(event) => setStateId(event.target.value)}>
+                  {states.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
                 </select>
               </label>
-              <div className="form-footer">
-                <span><b>6/6</b> informações essenciais</span>
-                <span className="ready-badge">Pronto para criar</span>
-              </div>
+              <label>Cidade
+                <select value={city} onChange={(event) => setCity(event.target.value)} disabled={loadingCities}>
+                  {loadingCities && <option>Carregando...</option>}
+                  {!loadingCities && cities.map((item) => <option key={item.id} value={item.nome}>{item.nome}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <label className="review-field">Mínimo de avaliações
+              <select value={minReviews} onChange={(event) => setMinReviews(event.target.value)}>
+                <option value="50">50+ avaliações</option><option value="100">100+ avaliações</option>
+                <option value="250">250+ avaliações</option><option value="500">500+ avaliações</option>
+              </select>
+            </label>
+
+            <div className="locked-filter"><span>✓</span><div><b>Somente negócios sem site</b><small>Filtro obrigatório para oportunidades reais</small></div><i>ATIVO</i></div>
+            <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
+            <p className="data-note">{mode === 'demo' && <b>MODO DEMONSTRAÇÃO · </b>}{notice}</p>
+          </section>
+
+          <section className="leads-panel">
+            <div className="panel-heading leads-heading"><span>02</span><div><b>Melhores oportunidades</b><small>Da maior para a menor quantidade de avaliações</small></div><div className="sort-chip">↓ AVALIAÇÕES</div></div>
+            <div className="lead-list">
+              {!leads.length && !searching && (
+                <div className="empty-state"><div>⌁</div><b>Seu radar está pronto</b><p>Escolha os filtros e inicie uma busca.</p></div>
+              )}
+              {searching && <div className="empty-state"><div className="spinner" /><b>Buscando oportunidades</b><p>Verificando reputação e presença digital.</p></div>}
+              {!searching && leads.map((lead, index) => (
+                <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => setSelectedLead(lead)}>
+                  <span className="rank-number">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><i>SEM SITE</i></span>
+                  <span className="rating"><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></span>
+                  <span className="select-arrow">›</span>
+                </button>
+              ))}
             </div>
           </section>
 
-          <section className="preview-panel">
-            <div className="preview-toolbar">
-              <div className="browser-dots"><i /><i /><i /></div>
-              <div className="preview-address">{business.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'seu-site'}.com.br</div>
-              <div className="device-toggle"><button className="active">▱</button><button>▯</button></div>
+          <section className="ai-panel">
+            <div className="panel-heading"><span>03</span><div><b>Escolha a IA</b><small>Ranking para criar um site bonito</small></div></div>
+            <div className="ranking-note">Ranking editorial para este fluxo — não é uma comparação universal.</div>
+            <div className="ai-list">
+              {aiRanking.map((ai) => (
+                <a key={ai.name} href={ai.url} target="_blank" rel="noreferrer" className="ai-row">
+                  <span className="ai-rank">#{ai.rank}</span><span className="ai-logo" style={{ background: ai.color }}>{ai.name.charAt(0)}</span>
+                  <span className="ai-info"><b>{ai.name}</b><small>{ai.kind}</small><em>{ai.reason}</em></span>
+                  <span className="ai-score">{ai.score}<small>/10</small></span>
+                </a>
+              ))}
             </div>
+          </section>
 
-            <div className="site-preview">
-              <nav className="site-nav">
-                <div className="preview-logo"><span>{business.charAt(0) || 'L'}</span>{business || 'Seu negócio'}</div>
-                <div className="site-links"><span>Início</span><span>Serviços</span><span>Sobre</span></div>
-                <button>Agendar conversa</button>
-              </nav>
-              <div className="hero-preview" style={sitePlan ? { background: sitePlan.palette.background } : undefined}>
-                <div className="hero-copy">
-                  <div className="location-tag">ATENDIMENTO EM {city.toUpperCase()} · {state?.sigla}</div>
-                  <h3>{headline}</h3>
-                  <p>{subheadline || 'Uma experiência criada para o perfil certo, no lugar certo.'}</p>
-                  <div className="hero-actions"><button style={sitePlan ? { background: sitePlan.palette.primary, color: '#fff' } : undefined}>{sitePlan?.cta ?? 'Quero saber mais'}</button><span style={sitePlan ? { color: sitePlan.palette.accent } : undefined}>✦ EXPERIÊNCIA SOB MEDIDA <small>{sitePlan?.tone ?? tone}</small></span></div>
-                </div>
-                <div className="visual-card">
-                  <div className="orb orb-one" /><div className="orb orb-two" />
-                  <div className="glass-note"><b>+32%</b><span>mais contatos qualificados</span></div>
-                  <div className="portrait-shape"><div className="portrait-head" /><div className="portrait-body" /></div>
-                </div>
-              </div>
-              <div className="trust-strip"><span>ESTRATÉGIA LOCAL</span><span>•</span><span>DESIGN AUTORAL</span><span>•</span><span>CONVERSÃO REAL</span></div>
-              <div className="service-row">
-                {benefits.slice(0, 3).map((item, index) => (
-                  <div key={item}><span>0{index + 1}</span><strong>{item}</strong><small>Conteúdo pensado para pessoas reais.</small></div>
-                ))}
-              </div>
+          <section className="prompt-panel">
+            <div className="prompt-header">
+              <div className="panel-heading"><span>04</span><div><b>Prompt premium automático</b><small>{selectedLead ? `Personalizado para ${selectedLead.name}` : 'Será personalizado com o lead selecionado'}</small></div></div>
+              <button onClick={copyPrompt}>{copied ? 'Copiado ✓' : 'Copiar prompt'}</button>
             </div>
-
-            <div className="generation-bar">
-              <div className="ai-avatar">✦</div>
-              <div><strong>{generating ? 'O Criador está trabalhando...' : sitePlan ? 'Nova versão criada' : 'O Criador está pronto'}</strong><span>{generationError || (sitePlan ? generationMode : 'Estratégia, copy e layout serão gerados juntos.')}</span></div>
-              <button onClick={generateSite} disabled={generating}>{generating ? 'Gerando...' : sitePlan ? 'Gerar outra' : 'Começar geração'}</button>
+            <div className="prompt-code">
+              <div className="prompt-top"><span>prompt-site.md</span><i>{prompt.length.toLocaleString('pt-BR')} caracteres</i></div>
+              <pre>{prompt}</pre>
             </div>
-            <p className="usage-note">IA conectada à sua conta OpenAI · consumo sujeito à cota e ao faturamento do projeto.</p>
+            <div className="prompt-footer"><span>✦ Gerado automaticamente</span><span>Sem inventar informações</span><span>Pronto para qualquer IA</span></div>
           </section>
         </div>
       </section>
