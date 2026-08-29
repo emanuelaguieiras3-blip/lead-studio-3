@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
     const leads = [...unique.values()]
       .filter((place) => place.businessStatus !== 'CLOSED_PERMANENTLY')
       .filter((place) => !place.websiteUri && (place.userRatingCount ?? 0) >= minReviews)
+      .filter((place) => Boolean(place.nationalPhoneNumber))
       .map((place) => ({
         id: place.id as string,
         name: place.displayName?.text ?? 'Empresa sem nome',
@@ -119,8 +120,8 @@ export async function POST(request: NextRequest) {
       leads,
       mode: 'google',
       notice: leads.length
-        ? `${leads.length} empresas reais sem site informado no Google, ordenadas por avaliações.`
-        : 'Nenhuma empresa real sem site atingiu o mínimo de avaliações nesta busca. Tente diminuir o filtro.',
+        ? `${leads.length} empresas reais com telefone e sem site informado no Google, ordenadas por avaliações.`
+        : 'Nenhuma empresa real com telefone e sem site atingiu o mínimo de avaliações nesta busca. Tente diminuir o filtro.',
     });
   } catch (error) {
     console.error(error);

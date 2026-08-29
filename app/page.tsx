@@ -59,10 +59,11 @@ const aiRanking = [
 function buildPrompt(lead: Lead | null, profession: Profession, city: string, uf: string) {
   const business = lead?.name ?? `uma ${profession.label.toLowerCase()} em ${city}`;
   const proof = lead ? `${lead.rating.toFixed(1)} estrelas e ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas` : 'boa reputação local';
+  const contact = lead?.phone ? `Telefone público para contato: ${lead.phone}.` : 'Telefone ainda não informado.';
   return `Crie um site completo, premium e altamente profissional para ${business}, uma empresa de ${profession.label} em ${city}/${uf}.
 
 OBJETIVO
-Transformar visitantes locais em contatos pelo WhatsApp e transmitir confiança imediatamente. A empresa ainda não possui site e já tem ${proof}. Use esse dado somente como prova social factual e não invente depoimentos, prêmios, preços, profissionais ou certificações.
+Transformar visitantes locais em contatos e transmitir confiança imediatamente. A empresa ainda não possui site e já tem ${proof}. ${contact} Use esses dados somente como informações factuais e não invente depoimentos, prêmios, preços, profissionais ou certificações.
 
 DIREÇÃO VISUAL
 Visual ${profession.style}. Evite aparência de template genérico, excesso de gradientes, cartões repetitivos e imagens artificiais. Use hierarquia tipográfica forte, espaçamento generoso, detalhes autorais, microinterações elegantes e fotografias coerentes com o negócio. O resultado deve parecer trabalho de uma agência de design premiada, mas continuar claro e fácil de usar.
@@ -81,7 +82,7 @@ REQUISITOS
 - Mobile first, responsivo, rápido e acessível.
 - SEO local para “${profession.label} em ${city}”.
 - HTML semântico, contraste adequado e navegação por teclado.
-- Botões de WhatsApp com número em placeholder fácil de trocar.
+- Use o telefone público informado em botões de ligação. Não afirme que ele possui WhatsApp sem confirmação; deixe o WhatsApp como campo editável quando necessário.
 - Textos em português do Brasil, humanos, específicos e sem clichês.
 - Componentes reutilizáveis e código limpo, pronto para produção.
 - Inclua metadados, favicon, Open Graph e estados de hover/foco.
@@ -102,6 +103,7 @@ export default function Home() {
   const [notice, setNotice] = useState('Os resultados serão consultados diretamente no Google Places.');
   const [mode, setMode] = useState<'idle' | 'blocked' | 'google'>('idle');
   const [copied, setCopied] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
 
   const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
   const profession = useMemo(() => professions.find((item) => item.id === professionId) ?? professions[0], [professionId]);
@@ -128,6 +130,7 @@ export default function Home() {
   async function searchLeads() {
     if (!city) return;
     setSearching(true);
+    setMode('idle');
     setNotice('Analisando negócios sem site e ordenando por avaliações...');
     try {
       const response = await fetch('/api/leads', {
@@ -147,7 +150,6 @@ export default function Home() {
     } catch (error) {
       setLeads([]);
       setSelectedLead(null);
-      setMode('idle');
       setNotice(error instanceof Error ? error.message : 'Não foi possível pesquisar.');
     } finally {
       setSearching(false);
@@ -158,6 +160,13 @@ export default function Home() {
     await navigator.clipboard.writeText(prompt);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  async function copyPhone() {
+    if (!selectedLead?.phone) return;
+    await navigator.clipboard.writeText(selectedLead.phone);
+    setCopiedPhone(true);
+    window.setTimeout(() => setCopiedPhone(false), 1800);
   }
 
   return (
@@ -239,12 +248,19 @@ export default function Home() {
               {!searching && leads.map((lead, index) => (
                 <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => setSelectedLead(lead)}>
                   <span className="rank-number">{String(index + 1).padStart(2, '0')}</span>
-                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><i>SEM SITE</i></span>
+                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">☎ {lead.phone}</small><i>SEM SITE</i></span>
                   <span className="rating"><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></span>
                   <span className="select-arrow">›</span>
                 </button>
               ))}
             </div>
+            {selectedLead && (
+              <div className="contact-bar">
+                <span><small>TELEFONE PÚBLICO</small><b>{selectedLead.phone}</b></span>
+                <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>
+                <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>
+              </div>
+            )}
           </section>
 
           <section className="ai-panel">
