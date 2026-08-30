@@ -197,7 +197,7 @@ export default function Home() {
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [activeDirection, setActiveDirection] = useState('cinematic');
   const [variation, setVariation] = useState(0);
-  const [aiProvider, setAiProvider] = useState<'openai' | 'claude' | 'gemini'>('claude');
+  const [aiProvider, setAiProvider] = useState<'auto' | 'openai' | 'claude' | 'gemini'>('auto');
   const [generatedBrief, setGeneratedBrief] = useState('');
   const generationRequest = useRef(0);
 
@@ -510,7 +510,7 @@ export default function Home() {
             <div className="provider-control" style={{ marginTop: 16 }}>
               <label className="field-label">PROVEDOR DE IA</label>
               <div className="profession-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-                {(['claude', 'gemini', 'openai'] as const).map((provider) => (
+                {(['auto', 'claude', 'gemini', 'openai'] as const).map((provider) => (
                   <button
                     key={provider}
                     type="button"
@@ -518,7 +518,7 @@ export default function Home() {
                     onClick={() => setAiProvider(provider)}
                   >
                     <span>{provider === 'claude' ? 'C' : provider === 'gemini' ? 'G' : 'O'}</span>
-                    {provider === 'claude' ? 'Claude IA' : provider === 'gemini' ? 'Gemini IA' : 'OpenAI'}
+                    {provider === 'auto' ? 'Auto (melhor IA)' : provider === 'claude' ? 'Claude IA' : provider === 'gemini' ? 'Gemini IA' : 'OpenAI'}
                   </button>
                 ))}
               </div>

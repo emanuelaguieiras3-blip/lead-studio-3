@@ -13,7 +13,7 @@ type LeadInput = {
   reviewCount: number | null;
 };
 
-type Provider = 'openai' | 'claude' | 'gemini';
+type Provider = 'openai' | 'claude' | 'gemini' | 'auto';
 
 const SEGMENT_CONTEXT: Record<string, { desire: string; action: string; proof: string; imagery: string }> = {
   barbearia: { desire: 'identidade, precisão e ritual de cuidado', action: 'agendar um horário', proof: 'acabamento, consistência e experiência', imagery: 'retratos fechados, metal escovado, couro e luz recortada' },
@@ -289,7 +289,8 @@ export async function POST(request: NextRequest) {
 
     const direction = clean(body?.direction || 'cinematic').toLowerCase();
     const variation = Math.max(0, Math.min(99, Number(body?.variation) || 0));
-    const provider = (String(body?.provider || 'claude').toLowerCase() as Provider);
+    const requestedProvider = String(body?.provider || 'auto').toLowerCase();
+    const provider: Provider = (requestedProvider === 'auto' ? 'openai' : requestedProvider) as Provider;
 
     if (!profile.segment || !profile.city || !profile.state || !lead.id || !lead.name) {
       return NextResponse.json({ error: 'Selecione uma oportunidade real antes de gerar o texto.' }, { status: 400 });
@@ -302,22 +303,40 @@ export async function POST(request: NextRequest) {
     let generatedText = '';
     let activeProvider: Provider = provider;
 
+    const safeCall = async (
+      call: (input: string) => Promise<string | null>,
+      name: Provider,
+    ): Promise<{ text: string; provider: Provider } | null> => {
+      try {
+        const text = (await call(proposalPrompt)) || '';
+        return text ? { text, provider: name } : null;
+      } catch {
+        return null;
+      }
+    };
+
     if (provider === 'openai') {
-      generatedText = (await callOpenAI(proposalPrompt)) || '';
+      const result = await safeCall(callOpenAI, 'openai');
+      if (result) { generatedText = result.text; activeProvider = result.provider; }
     } else if (provider === 'claude') {
-      generatedText = (await callClaude(proposalPrompt)) || '';
+      const result = await safeCall(callClaude, 'claude');
+      if (result) { generatedText = result.text; activeProvider = result.provider; }
     } else if (provider === 'gemini') {
-      generatedText = (await callGemini(proposalPrompt)) || '';
+      const result = await safeCall(callGemini, 'gemini');
+      if (result) { generatedText = result.text; activeProvider = result.provider; }
     }
 
     if (!generatedText) {
       const fallbackProviderOrder: Provider[] = ['claude', 'gemini', 'openai'];
       for (const fallbackProvider of fallbackProviderOrder) {
         if (fallbackProvider === provider) continue;
-        const text = fallbackProvider === 'claude' ? await callClaude(proposalPrompt) : fallbackProvider === 'gemini' ? await callGemini(proposalPrompt) : await callOpenAI(proposalPrompt);
-        if (text) {
-          generatedText = text;
-          activeProvider = fallbackProvider;
+        const result = await safeCall(
+          fallbackProvider === 'claude' ? callClaude : fallbackProvider === 'gemini' ? callGemini : callOpenAI,
+          fallbackProvider,
+        );
+        if (result) {
+          generatedText = result.text;
+          activeProvider = result.provider;
           break;
         }
       }
