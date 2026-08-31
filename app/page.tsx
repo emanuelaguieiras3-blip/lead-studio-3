@@ -16,6 +16,7 @@ type Lead = {
   website: null;
   mapsUrl: string;
   source: 'google' | 'openstreetmap';
+  verificationLabel: string;
 };
 
 type SearchApiResponse = {
@@ -27,7 +28,25 @@ type SearchApiResponse = {
 
 type AppMode = 'idle' | 'blocked' | 'google' | 'openstreetmap';
 
-type GenerateApiResponse = { prompt?: string; proposal?: string; notice?: string; mode?: string; error?: string };
+type GenerateApiResponse = {
+  prompt?: string;
+  proposal?: string;
+  suggestions?: string | null;
+  notice?: string;
+  mode?: string;
+  provider?: 'openai' | 'claude' | 'gemini' | null;
+  error?: string;
+};
+
+type BuildSiteApiResponse = {
+  provider?: 'kimi' | 'cursor';
+  html?: string;
+  usage?: { input: number | null; output: number | null; total: number | null; cached: number | null };
+  agentUrl?: string;
+  status?: string;
+  notice?: string;
+  error?: string;
+};
 
 const states: StateOption[] = [
   { id: 12, sigla: 'AC', nome: 'Acre' }, { id: 27, sigla: 'AL', nome: 'Alagoas' },
@@ -197,8 +216,14 @@ export default function Home() {
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [activeDirection, setActiveDirection] = useState('cinematic');
   const [variation, setVariation] = useState(0);
-  const [aiProvider, setAiProvider] = useState<'auto' | 'openai' | 'claude' | 'gemini'>('auto');
+  const [aiProvider, setAiProvider] = useState<'local' | 'auto' | 'openai' | 'claude' | 'gemini'>('local');
+  const [activeAiProvider, setActiveAiProvider] = useState('local');
   const [generatedBrief, setGeneratedBrief] = useState('');
+  const [buildingSite, setBuildingSite] = useState<'kimi' | 'cursor' | null>(null);
+  const [generatedSiteHtml, setGeneratedSiteHtml] = useState('');
+  const [siteBuildNotice, setSiteBuildNotice] = useState('Gere um prompt e escolha onde construir o site.');
+  const [siteUsage, setSiteUsage] = useState<number | null>(null);
+  const [cursorAgentUrl, setCursorAgentUrl] = useState('');
   const generationRequest = useRef(0);
 
   const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
@@ -229,6 +254,10 @@ export default function Home() {
   function resetResults(message?: string) {
     setCopied(false);
     setGeneratedBrief('');
+    setActiveAiProvider('local');
+    setGeneratedSiteHtml('');
+    setSiteUsage(null);
+    setCursorAgentUrl('');
     setLeads([]);
     setLeadPage(1);
     setSelectedLead(null);
@@ -268,7 +297,12 @@ export default function Home() {
     }
   }
 
-  async function generateIntegratedPrompt(direction = activeDirection, leadOverride?: Lead, variationOverride = variation) {
+  async function generateIntegratedPrompt(
+    direction = activeDirection,
+    leadOverride?: Lead,
+    variationOverride = variation,
+    providerOverride = aiProvider,
+  ) {
     const lead = leadOverride ?? selectedLead;
     if (!lead) {
       setNotice('Selecione uma oportunidade real para gerar o texto.');
@@ -288,20 +322,22 @@ export default function Home() {
           state: state.sigla,
           lead,
           direction,
-          provider: aiProvider,
+          provider: providerOverride,
           variation: variationOverride,
         }),
       });
       const data = (await response.json()) as GenerateApiResponse & { proposal?: string };
-      if (!response.ok || !(data.prompt || data.proposal)) throw new Error(data.error || 'Não foi possível gerar o texto.');
+      if (!response.ok || !data.prompt) throw new Error(data.error || 'Não foi possível gerar o prompt.');
       if (generationRequest.current !== requestId) return '';
-      const nextPrompt = data.proposal || data.prompt || '';
+      const nextPrompt = data.prompt;
       setGeneratedBrief(nextPrompt);
+      setActiveAiProvider(data.provider ?? 'local');
       setNotice(data.notice || `Texto exclusivo criado para ${lead.name}.`);
       return nextPrompt;
     } catch (error) {
       if (generationRequest.current === requestId) {
         setGeneratedBrief('');
+        setActiveAiProvider('local');
         setNotice(error instanceof Error ? error.message : 'Não foi possível gerar o brief.');
       }
       return '';
@@ -344,6 +380,59 @@ export default function Home() {
     await navigator.clipboard.writeText(selectedLead.phone);
     setCopiedPhone(true);
     window.setTimeout(() => setCopiedPhone(false), 1800);
+  }
+
+  async function buildSite(provider: 'kimi' | 'cursor') {
+    if (!selectedLead || !generatedBrief) {
+      setNotice('Selecione um negócio e gere o prompt antes de criar o site.');
+      return;
+    }
+
+    setBuildingSite(provider);
+    setSiteBuildNotice(provider === 'kimi' ? 'A Kimi está criando o HTML do site...' : 'Iniciando um agente seguro do Cursor...');
+    try {
+      const response = await fetch('/api/build-site', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: provider, prompt: generatedBrief }),
+      });
+      const data = await response.json() as BuildSiteApiResponse;
+      if (!response.ok) throw new Error(data.error || 'Não foi possível criar o site.');
+
+      if (provider === 'kimi' && data.html) {
+        setGeneratedSiteHtml(data.html);
+        setSiteUsage(data.usage?.total ?? null);
+        window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
+      }
+      if (provider === 'cursor' && data.agentUrl) setCursorAgentUrl(data.agentUrl);
+      setSiteBuildNotice(data.notice || 'Criação iniciada.');
+    } catch (error) {
+      setSiteBuildNotice(error instanceof Error ? error.message : 'Não foi possível criar o site.');
+    } finally {
+      setBuildingSite(null);
+    }
+  }
+
+  function buildWithLovable() {
+    if (!selectedLead || !generatedBrief) {
+      setNotice('Selecione um negócio e gere o prompt antes de abrir o Lovable.');
+      return;
+    }
+    const concisePrompt = generatedBrief.slice(0, 12_000);
+    const lovableUrl = `https://lovable.dev/?autosubmit=true#prompt=${encodeURIComponent(concisePrompt)}`;
+    window.open(lovableUrl, '_blank', 'noopener,noreferrer');
+    setSiteBuildNotice('Lovable aberto com o prompt preenchido. Entre na sua conta para iniciar a construção.');
+  }
+
+  function downloadGeneratedSite() {
+    if (!generatedSiteHtml || !selectedLead) return;
+    const blob = new Blob([generatedSiteHtml], { type: 'text/html;charset=utf-8' });
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${selectedLead.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'site'}.html`;
+    link.click();
+    URL.revokeObjectURL(downloadUrl);
   }
 
   return (
@@ -431,7 +520,7 @@ export default function Home() {
               </select>
             </label>
 
-            <div className="locked-filter"><span>✓</span><div><b>Somente negócios reais</b><small>Google Places ou OpenStreetMap · sem cadastros fictícios</small></div><i>ATIVO</i></div>
+            <div className="locked-filter"><span>✓</span><div><b>Somente cadastros com telefone</b><small>Fonte pública rastreável · Google Maps prioritário</small></div><i>ATIVO</i></div>
             <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
             <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{(mode === 'google' || mode === 'openstreetmap') && <b>DADOS REAIS · </b>}{notice}</p>
           </section>
@@ -446,7 +535,7 @@ export default function Home() {
               {!searching && paginatedLeads.map((lead, index) => (
                 <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => void selectOpportunity(lead)}>
                   <span className="rank-number">{String((currentLeadPage - 1) * LEADS_PER_PAGE + index + 1).padStart(2, '0')}</span>
-                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">{lead.phone ? `☎ ${lead.phone}` : 'Contato não informado na fonte'}</small><i>SEM SITE INFORMADO</i></span>
+                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">☎ {lead.phone}</small><i>{lead.source === 'google' ? 'GOOGLE MAPS · SEM SITE' : 'OPENSTREETMAP · SEM SITE'}</i></span>
                   <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>{lead.source === 'google' ? 'Google Places' : 'OpenStreetMap'}</small></>}</span>
                   <span className="select-arrow">›</span>
                 </button>
@@ -476,9 +565,9 @@ export default function Home() {
             )}
             {selectedLead && (
               <div className="contact-bar">
-                <span><small>{selectedLead.phone ? 'TELEFONE PÚBLICO' : 'FONTE PÚBLICA'}</small><b>{selectedLead.phone || (selectedLead.source === 'google' ? 'Google Places' : 'OpenStreetMap')}</b></span>
-                {selectedLead.phone && <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>}
-                {selectedLead.phone && <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>}
+                <span><small>{selectedLead.verificationLabel || 'TELEFONE PÚBLICO NA FONTE'}</small><b>{selectedLead.phone}</b></span>
+                <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>
+                <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>
                 <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">Ver cadastro ↗</a>
               </div>
             )}
@@ -486,7 +575,7 @@ export default function Home() {
 
           <section className="ai-panel" id="direcao">
             <div className="panel-heading"><span>03</span><div><b>Direção criativa</b><small>Cada caminho muda narrativa, copy e interação</small></div></div>
-            <div className="ranking-note">Selecione uma direção para regenerar um prompt realmente diferente.</div>
+            <div className="ranking-note">Selecione uma direção para regenerar um prompt realmente diferente. Para código complexo, Auto prioriza OpenAI; Claude é uma ótima opção para narrativa e copy.</div>
             <div className="ai-list">
               {creativeDirections.map((direction, index) => (
                 <button
@@ -510,17 +599,25 @@ export default function Home() {
             <div className="provider-control" style={{ marginTop: 16 }}>
               <label className="field-label">PROVEDOR DE IA</label>
               <div className="profession-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-                {(['auto', 'claude', 'gemini', 'openai'] as const).map((provider) => (
+                {(['local', 'auto', 'openai', 'claude', 'gemini'] as const).map((provider) => (
                   <button
                     key={provider}
                     type="button"
                     className={aiProvider === provider ? 'profession active' : 'profession'}
-                    onClick={() => setAiProvider(provider)}
+                    onClick={async () => {
+                      setAiProvider(provider);
+                      if (selectedLead) await generateIntegratedPrompt(activeDirection, selectedLead, variation, provider);
+                    }}
                   >
-                    <span>{provider === 'claude' ? 'C' : provider === 'gemini' ? 'G' : 'O'}</span>
-                    {provider === 'auto' ? 'Auto (melhor IA)' : provider === 'claude' ? 'Claude IA' : provider === 'gemini' ? 'Gemini IA' : 'OpenAI'}
+                    <span>{provider === 'claude' ? 'C' : provider === 'gemini' ? 'G' : provider === 'openai' ? 'O' : provider === 'local' ? '0' : '✦'}</span>
+                    {provider === 'local' ? 'Local · zero tokens' : provider === 'auto' ? 'Auto · melhor IA' : provider === 'claude' ? 'Claude' : provider === 'gemini' ? 'Gemini' : 'OpenAI · código'}
                   </button>
                 ))}
+              </div>
+              <div className="provider-recommendation">
+                <b>Integração resiliente</b>
+                <p>Com chave configurada, a IA acrescenta direção criativa ao prompt. Sem chave, o gerador local detalhado continua funcionando para todos.</p>
+                <span>Ativo agora: {activeAiProvider === 'local' ? 'gerador local seguro' : activeAiProvider}</span>
               </div>
             </div>
           </section>
@@ -534,10 +631,65 @@ export default function Home() {
               </div>
             </div>
             <div className="prompt-code">
-              <div className="prompt-top"><span>prompt-site.md</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
+              <div className="prompt-top"><span>prompt-site.md · {activeAiProvider}</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
               <textarea className="prompt-editor" value={activePrompt} onChange={(event) => setGeneratedBrief(event.target.value)} aria-label="Prompt do site" />
             </div>
-            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Gatilhos éticos</span><span>Sem inventar informações</span><span>Pronto para qualquer IA</span></div>
+            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Google Maps prioritário</span><span>Auditoria factual</span><span>Pronto para Codex, Claude e outras IAs</span></div>
+          </section>
+
+          <section className="builder-panel" id="site-gerado">
+            <div className="builder-heading">
+              <div className="panel-heading"><span>05</span><div><b>Crie o site de verdade</b><small>Escolha o destino do prompt e acompanhe o resultado</small></div></div>
+              {siteUsage !== null && <div className="usage-chip">{siteUsage.toLocaleString('pt-BR')} tokens nesta geração</div>}
+            </div>
+
+            <div className="builder-options">
+              <article className="builder-option recommended">
+                <span className="builder-badge">MAIS DIRETO</span>
+                <div className="builder-logo">K</div>
+                <h3>Kimi · prévia aqui</h3>
+                <p>Gera um HTML completo e mostra o site dentro do Lead Studio. Usa Kimi K2.6 sem raciocínio longo e com limite de saída.</p>
+                <button type="button" onClick={() => void buildSite('kimi')} disabled={Boolean(buildingSite) || !generatedBrief}>
+                  {buildingSite === 'kimi' ? 'Criando site...' : 'Criar site com Kimi'}
+                </button>
+              </article>
+
+              <article className="builder-option">
+                <span className="builder-badge">OFICIAL</span>
+                <div className="builder-logo lovable">L</div>
+                <h3>Lovable · construir</h3>
+                <p>Abre o fluxo oficial do Lovable com o prompt já preenchido. O login e a geração acontecem na sua conta Lovable.</p>
+                <button type="button" onClick={buildWithLovable} disabled={!generatedBrief}>Abrir e construir no Lovable ↗</button>
+              </article>
+
+              <article className="builder-option">
+                <span className="builder-badge">REPOSITÓRIO</span>
+                <div className="builder-logo cursor">C</div>
+                <h3>Cursor · branch e PR</h3>
+                <p>Cria um agente em nuvem, trabalha em uma branch separada e abre um pull request para você revisar.</p>
+                <button type="button" onClick={() => void buildSite('cursor')} disabled={Boolean(buildingSite) || !generatedBrief}>
+                  {buildingSite === 'cursor' ? 'Iniciando agente...' : 'Enviar para o Cursor'}
+                </button>
+              </article>
+            </div>
+
+            <div className="builder-notice" role="status">{siteBuildNotice}</div>
+            {cursorAgentUrl && <a className="cursor-agent-link" href={cursorAgentUrl} target="_blank" rel="noreferrer">Acompanhar agente no Cursor ↗</a>}
+
+            {generatedSiteHtml && (
+              <div className="site-preview-shell">
+                <div className="site-preview-top">
+                  <span><i /> Prévia isolada do site</span>
+                  <button type="button" onClick={downloadGeneratedSite}>Baixar HTML</button>
+                </div>
+                <iframe
+                  className="site-preview-frame"
+                  srcDoc={generatedSiteHtml}
+                  sandbox="allow-scripts"
+                  title={`Prévia do site gerado para ${selectedLead?.name || 'o negócio selecionado'}`}
+                />
+              </div>
+            )}
           </section>
         </div>
       </section>

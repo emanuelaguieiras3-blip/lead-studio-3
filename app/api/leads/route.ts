@@ -30,6 +30,19 @@ type GooglePlace = {
   businessStatus?: string;
 };
 
+export type PublicLead = {
+  id: string;
+  name: string;
+  rating: number | null;
+  reviewCount: number | null;
+  address: string;
+  phone: string;
+  website: null;
+  mapsUrl: string;
+  source: 'google' | 'openstreetmap';
+  verificationLabel: string;
+};
+
 type GoogleResponse = { places?: GooglePlace[]; nextPageToken?: string };
 
 type OsmElement = {
@@ -82,27 +95,49 @@ export function buildSearchQueries(profession: string, city: string, state: stri
   return [...new Set(queries)];
 }
 
-export function filterLeadCandidates(results: GooglePlace[], minReviews: number) {
-  const floor = Math.max(15, Math.min(250, Math.round(minReviews * 0.35)));
+export function normalizePublicPhone(value: string | undefined) {
+  if (!value) return '';
+
+  const firstPhone = value.split(/[;/]/)[0]?.trim() ?? '';
+  const hasInternationalPrefix = firstPhone.trim().startsWith('+');
+  const digits = firstPhone.replace(/\D/g, '');
+  const brazilianDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+
+  if (!/^\d{10,11}$/.test(brazilianDigits)) return '';
+
+  const areaCode = brazilianDigits.slice(0, 2);
+  const localNumber = brazilianDigits.slice(2);
+  const formattedLocal = localNumber.length === 9
+    ? `${localNumber.slice(0, 5)}-${localNumber.slice(5)}`
+    : `${localNumber.slice(0, 4)}-${localNumber.slice(4)}`;
+  const countryPrefix = hasInternationalPrefix || digits.startsWith('55') ? '+55 ' : '';
+  return `${countryPrefix}(${areaCode}) ${formattedLocal}`;
+}
+
+export function filterLeadCandidates(results: GooglePlace[], minReviews: number): PublicLead[] {
+  const floor = Math.max(20, Math.min(500, Math.round(minReviews)));
 
   return [...results]
     .filter((place) => place.id)
-    .filter((place) => place.businessStatus !== 'CLOSED_PERMANENTLY')
+    .filter((place) => place.businessStatus === 'OPERATIONAL')
     .filter((place) => !place.websiteUri || !place.websiteUri.trim())
-    .filter((place) => Boolean(place.nationalPhoneNumber))
-    .filter((place) => (place.userRatingCount ?? 0) >= floor || (place.rating ?? 0) >= 4.6)
+    .filter((place) => Boolean(normalizePublicPhone(place.nationalPhoneNumber)))
+    .filter((place) => Boolean(place.googleMapsUri?.startsWith('https://')))
+    .filter((place) => (place.userRatingCount ?? 0) >= floor)
     .map((place) => ({
       id: place.id as string,
-      name: place.displayName?.text ?? 'Empresa sem nome',
-      rating: place.rating ?? 0,
-      reviewCount: place.userRatingCount ?? 0,
+      name: place.displayName?.text?.trim() || 'Empresa sem nome',
+      rating: typeof place.rating === 'number' ? place.rating : null,
+      reviewCount: typeof place.userRatingCount === 'number' ? place.userRatingCount : null,
       address: place.formattedAddress ?? '',
-      phone: place.nationalPhoneNumber ?? '',
+      phone: normalizePublicPhone(place.nationalPhoneNumber),
       website: null,
       mapsUrl: place.googleMapsUri ?? '',
       source: 'google' as const,
+      verificationLabel: 'Cadastro operacional verificado no Google Maps',
     }))
-    .sort((a, b) => b.reviewCount - a.reviewCount || b.rating - a.rating);
+    .filter((lead) => lead.name !== 'Empresa sem nome')
+    .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0) || (b.rating ?? 0) - (a.rating ?? 0));
 }
 
 const OSM_FILTERS: Record<string, string[]> = {
@@ -129,7 +164,7 @@ const OSM_FILTERS: Record<string, string[]> = {
 };
 
 function osmPhone(tags: Record<string, string>) {
-  return tags.phone || tags['contact:phone'] || tags.mobile || tags['contact:mobile'] || '';
+  return normalizePublicPhone(tags.phone || tags['contact:phone'] || tags.mobile || tags['contact:mobile']);
 }
 
 function osmAddress(tags: Record<string, string>, city: string, state: string) {
@@ -162,16 +197,18 @@ async function fetchNominatimBusinesses(profession: string, city: string, state:
   return results
     .filter((item) => item.osm_type && item.osm_id && item.name && !ignoredTypes.has(item.type || ''))
     .filter((item) => !item.extratags?.website && !item.extratags?.['contact:website'])
+    .filter((item) => Boolean(normalizePublicPhone(item.extratags?.phone || item.extratags?.['contact:phone'])))
     .map((item) => ({
       id: `osm-${item.osm_type}-${item.osm_id}`,
       name: item.name as string,
       rating: null,
       reviewCount: null,
       address: item.display_name || `${city} · ${state}`,
-      phone: item.extratags?.phone || item.extratags?.['contact:phone'] || '',
+      phone: normalizePublicPhone(item.extratags?.phone || item.extratags?.['contact:phone']),
       website: null,
       mapsUrl: `https://www.openstreetmap.org/${item.osm_type}/${item.osm_id}`,
       source: 'openstreetmap' as const,
+      verificationLabel: 'Cadastro público verificado no OpenStreetMap',
     }));
 }
 
@@ -216,6 +253,7 @@ async function fetchOpenStreetMap(profession: string, city: string, state: strin
       const tags = element.tags ?? {};
       return !tags.website && !tags['contact:website'] && !tags.url && tags.disused !== 'yes';
     })
+    .filter((element) => Boolean(osmPhone(element.tags ?? {})))
     .map((element) => {
       const tags = element.tags ?? {};
       const phone = osmPhone(tags);
@@ -229,6 +267,7 @@ async function fetchOpenStreetMap(profession: string, city: string, state: strin
         website: null,
         mapsUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
         source: 'openstreetmap' as const,
+        verificationLabel: 'Cadastro público verificado no OpenStreetMap',
       };
     })
     .sort((a, b) => Number(Boolean(b.phone)) - Number(Boolean(a.phone)) || a.name.localeCompare(b.name, 'pt-BR'))
@@ -379,8 +418,8 @@ export async function POST(request: NextRequest) {
         leads,
         mode: 'openstreetmap',
         notice: leads.length
-          ? `${leads.length} negócios reais do OpenStreetMap sem site informado na fonte. Contatos informados aparecem primeiro.`
-          : `Nenhum negócio sem site informado foi encontrado em ${city}/${state} nessa fonte pública.`,
+          ? `${leads.length} negócios com telefone público e sem site informado no OpenStreetMap. Confira cada cadastro no link da fonte.`
+          : `Nenhum negócio com telefone público e sem site informado foi encontrado em ${city}/${state} nessa fonte pública.`,
       });
     }
 
@@ -394,8 +433,8 @@ export async function POST(request: NextRequest) {
       leads,
       mode: 'google',
       notice: leads.length
-        ? `${leads.length} empresas reais com telefone e sem site informado no Google, ordenadas por avaliações.`
-        : 'Nenhuma empresa real com telefone e sem site atingiu o mínimo de avaliações nesta busca. Tente diminuir o filtro.',
+        ? `${leads.length} empresas operacionais com telefone público e sem site informado no Google Maps, ordenadas por avaliações.`
+        : 'Nenhuma empresa operacional com telefone público e sem site atingiu o mínimo de avaliações. Tente diminuir o filtro.',
     });
   } catch (error) {
     console.error('Lead search failed:', error instanceof Error ? error.name : 'UnknownError');
