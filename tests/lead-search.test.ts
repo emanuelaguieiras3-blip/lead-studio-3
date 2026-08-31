@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { NextRequest } from 'next/server.js';
 
-import { buildSearchQueries, filterLeadCandidates, normalizePublicPhone } from '../app/api/leads/route.ts';
+import { POST as searchLeads, buildSearchQueries, filterLeadCandidates, normalizePublicPhone } from '../app/api/leads/route.ts';
 
 test('buildSearchQueries creates broader city-specific searches', () => {
   const queries = buildSearchQueries('Barbearia', 'São Paulo', 'São Paulo');
@@ -86,5 +87,35 @@ test('normalizePublicPhone accepts Brazilian public numbers and removes invalid 
   assert.equal(normalizePublicPhone('+55 11 98888-7777'), '+55 (11) 98888-7777');
   assert.equal(normalizePublicPhone('11 3333-2222'), '(11) 3333-2222');
   assert.equal(normalizePublicPhone('12345'), '');
+});
+
+test('lead search stays Google-only and does not share an anonymous click limit', async () => {
+  const keyNames = [
+    'GOOGLE_PLACES_API_KEY_1', 'GOOGLE_PLACES_API_KEY_2', 'GOOGLE_PLACES_API_KEY_3',
+    'GOOGLE_PLACES_API_KEY_4', 'GOOGLE_PLACES_API_KEY_5', 'GOOGLE_PLACES_API_KEY',
+  ] as const;
+  const previous = new Map(keyNames.map((key) => [key, process.env[key]]));
+  for (const key of keyNames) delete process.env[key];
+
+  try {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const request = new NextRequest('http://localhost:3000/api/leads', {
+        method: 'POST',
+        headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profession: 'Barbearia', city: 'São Paulo', state: 'São Paulo', minReviews: 30 }),
+      });
+      const response = await searchLeads(request);
+      const payload = await response.json() as { mode?: string; error?: string };
+      assert.equal(response.status, 503);
+      assert.equal(payload.mode, 'blocked');
+      assert.match(payload.error ?? '', /Google Maps/);
+    }
+  } finally {
+    for (const key of keyNames) {
+      const value = previous.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 

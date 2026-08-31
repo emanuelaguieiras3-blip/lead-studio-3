@@ -99,12 +99,14 @@ button { cursor:pointer; }
 .rating b { font-size:10px; }
 .rating small { margin-top:4px; color:#85877f; font-size:8px; }
 .select-arrow { color:#97998f; font-size:18px; }
-.contact-bar { display:grid; grid-template-columns:1fr repeat(3,auto); align-items:center; gap:8px; margin-top:12px; padding:11px 12px; border:1px solid #ccd7a7; border-radius:11px; background:#f6fae8; }
+.contact-bar { display:grid; grid-template-columns:minmax(150px,1fr) repeat(5,auto); align-items:center; gap:8px; margin-top:12px; padding:11px 12px; border:1px solid #ccd7a7; border-radius:11px; background:#f6fae8; }
 .contact-bar span small,.contact-bar span b { display:block; }
 .contact-bar span small { color:#7c8268; font-size:7px; font-weight:850; letter-spacing:.1em; }
 .contact-bar span b { margin-top:4px; font-family:var(--font-geist-mono); font-size:11px; }
 .contact-bar button,.contact-bar a { padding:8px 10px; border:1px solid #cbd2b3; border-radius:8px; background:#fff; color:#35362f; font-size:8px; font-weight:800; text-decoration:none; }
 .contact-bar a { border-color:#252520; background:#252520; color:#fff; }
+.contact-bar .instagram-link { border-color:#9b3ab6; background:linear-gradient(135deg,#7c3aed,#db2777,#f59e0b); }
+.contact-bar .facebook-link { border-color:#1769d2; background:#1769d2; }
 .empty-state { min-height:410px; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#85877f; text-align:center; }
 .empty-state>div { width:54px; height:54px; display:grid; place-items:center; margin-bottom:14px; border:1px solid #d3d4cc; border-radius:50%; background:#eeede7; color:#9bac56; font-size:20px; }
 .empty-state b { color:#3f403a; font-size:12px; }
@@ -228,9 +230,9 @@ button { cursor:pointer; }
   .prompt-header { display:block; }
   .prompt-actions { justify-content:stretch; }
   .prompt-header button { width:100%; margin:-7px 0 14px; }
-  .contact-bar { grid-template-columns:1fr auto; }
-  .contact-bar a { text-align:center; }
-  .contact-bar a:last-child { grid-column:1/3; }
+  .contact-bar { grid-template-columns:1fr 1fr; }
+  .contact-bar > span { grid-column:1/-1; }
+  .contact-bar button,.contact-bar a { text-align:center; }
 }
 @media (prefers-reduced-motion:reduce) {
   .cursor-progress span.working { animation:none; }

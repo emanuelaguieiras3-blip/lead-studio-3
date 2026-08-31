@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server.js';
 
 const MAX_BODY_BYTES = 36_000;
 const MAX_PROMPT_LENGTH = 24_000;
-const MAX_HTML_LENGTH = 100_000;
-const WINDOW_MS = 60_000;
-const requestWindows = new Map<string, { startedAt: number; count: number }>();
+const MAX_HTML_LENGTH = 240_000;
+const MAX_SITE_OUTPUT_TOKENS = 24_000;
 
 type BuildAction = 'build' | 'cursor' | 'cursor_status';
 type DirectProvider = 'auto' | 'kimi' | 'openai';
@@ -61,19 +60,6 @@ function isTrustedOrigin(request: NextRequest): boolean {
   return allowedOrigins.has(origin);
 }
 
-function isRateLimited(request: NextRequest, maxRequests: number): boolean {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const key = forwarded || request.headers.get('cf-connecting-ip') || 'anonymous';
-  const now = Date.now();
-  const current = requestWindows.get(key);
-  if (!current || now - current.startedAt >= WINDOW_MS) {
-    requestWindows.set(key, { startedAt: now, count: 1 });
-    return false;
-  }
-  current.count += 1;
-  return current.count > maxRequests;
-}
-
 function cleanText(value: unknown, max = MAX_PROMPT_LENGTH): string {
   return typeof value === 'string'
     ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max)
@@ -102,7 +88,7 @@ export function buildCompactSitePrompt(prompt: string): string {
 ENTREGA OBRIGATÓRIA
 - Retorne somente um documento HTML5 completo, começando por <!doctype html>.
 - CSS e JavaScript devem estar no próprio arquivo; não use bibliotecas, fontes, scripts ou iframes externos.
-- Limite o arquivo a 55 KB e mantenha o JavaScript mínimo.
+- O arquivo pode ter até 120 KB quando isso melhorar a experiência; mantenha o JavaScript objetivo.
 - Use português do Brasil, layout mobile first, acessível, responsivo e visual profissional.
 - Use somente os dados verificados da especificação. Não invente telefone, endereço, avaliações, serviços, preços, equipe ou depoimentos.
 - Se um dado não existir, omita a seção ou mostre [VALIDAR COM O NEGÓCIO].
@@ -139,10 +125,10 @@ async function requestKimi(prompt: string): Promise<DirectBuildResult> {
         { role: 'user', content: buildCompactSitePrompt(prompt) },
       ],
       thinking: { type: 'disabled' },
-      max_completion_tokens: 6_000,
+      max_completion_tokens: MAX_SITE_OUTPUT_TOKENS,
       prompt_cache_key: 'lead-studio-site-builder-v2',
     }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(240_000),
   });
   if (!response.ok) throw new Error(`kimi_${response.status}`);
   const payload = await response.json() as KimiResponse;
@@ -176,13 +162,13 @@ async function requestOpenAI(prompt: string): Promise<DirectBuildResult> {
       model,
       instructions: BUILDER_INSTRUCTIONS,
       input: buildCompactSitePrompt(prompt),
-      max_output_tokens: 6_000,
+      max_output_tokens: MAX_SITE_OUTPUT_TOKENS,
       reasoning: { effort: 'low' },
       text: { verbosity: 'low' },
       prompt_cache_key: 'lead-studio-site-builder-v2',
       store: false,
     }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(240_000),
   });
   if (!response.ok) throw new Error(`openai_${response.status}`);
   const payload = await response.json() as OpenAIResponse;
@@ -295,7 +281,7 @@ REGRAS
 - artifacts/site.html deve começar por <!doctype html>, conter CSS/JS embutidos e não depender de recursos externos.
 - Termine informando objetivamente o que foi criado.
 
-${prompt.slice(0, 16_000)}`;
+${prompt.slice(0, MAX_PROMPT_LENGTH)}`;
   try {
     const response = await cursorFetch('/v1/agents', {
       method: 'POST',
@@ -404,9 +390,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const body = await request.json() as Record<string, unknown> | null;
     const action = cleanText(body?.action, 30) as BuildAction;
     if (!['build', 'cursor', 'cursor_status'].includes(action)) return secureJson({ error: 'Ação de construção inválida.' }, 400);
-    if (isRateLimited(request, action === 'cursor_status' ? 30 : 4)) {
-      return secureJson({ error: 'Limite atingido. Aguarde um minuto antes de tentar novamente.' }, 429);
-    }
     if (action === 'cursor_status') return cursorStatus(body ?? {});
     const prompt = cleanText(body?.prompt);
     if (prompt.length < 400) return secureJson({ error: 'Gere e revise o prompt antes de criar o site.' }, 400);

@@ -9,7 +9,7 @@ type LeadInput = {
   address: string;
   phone: string;
   mapsUrl: string;
-  source: 'google' | 'openstreetmap';
+  source: 'google';
   rating: number | null;
   reviewCount: number | null;
 };
@@ -100,7 +100,7 @@ function buildProposalText(profile: Record<string, string>, lead: LeadInput, dir
   const leadName = lead.name || 'empresa local';
   const leadAddress = lead.address || `${city}/${state}`;
   const contactLine = lead.phone ? `Contato principal: ${lead.phone}.` : 'Contato público não informado na fonte consultada.';
-  const sourceLabel = lead.source === 'google' ? 'Google Places' : 'OpenStreetMap';
+  const sourceLabel = 'Google Places';
   const ratingLine = lead.rating !== null && lead.reviewCount !== null
     ? `Há ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas com média de ${lead.rating.toFixed(1)} estrelas.`
     : 'Não há nota pública confiável disponível na fonte consultada.';
@@ -146,7 +146,7 @@ export function buildOpportunityPrompt(profile: Record<string, string>, lead: Le
     ? `${lead.rating.toFixed(1)} estrelas em ${lead.reviewCount.toLocaleString('pt-BR')} avaliações públicas`
     : 'a fonte consultada não fornece nota nem avaliações; não criar esses números';
   const phoneFact = lead.phone || 'telefone não informado na fonte';
-  const sourceLabel = lead.source === 'google' ? 'Google Places' : 'OpenStreetMap';
+  const sourceLabel = 'Google Places';
 
   return `# PROMPT DE PRODUÇÃO — ${lead.name}
 
@@ -391,13 +391,12 @@ async function callGemini(prompt: string): Promise<string | null> {
   return data.candidates?.flatMap((candidate) => candidate.content?.parts ?? []).map((part) => part.text ?? '').join('\n').trim() ?? '';
 }
 
-function isValidMapsUrl(value: string, source: LeadInput['source']): boolean {
+function isValidMapsUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.protocol !== 'https:') return false;
     const hostname = url.hostname.toLowerCase();
-    if (source === 'google') return hostname === 'maps.google.com' || hostname.endsWith('.google.com');
-    return hostname === 'openstreetmap.org' || hostname.endsWith('.openstreetmap.org');
+    return hostname === 'maps.google.com' || hostname.endsWith('.google.com');
   } catch {
     return false;
   }
@@ -440,7 +439,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const rawLead = body?.lead && typeof body.lead === 'object' ? body.lead as Record<string, unknown> : {};
     const lead: LeadInput = {
       id: clean(rawLead.id), name: clean(rawLead.name), address: clean(rawLead.address), phone: clean(rawLead.phone),
-      mapsUrl: clean(rawLead.mapsUrl), source: rawLead.source === 'google' ? 'google' : 'openstreetmap',
+      mapsUrl: clean(rawLead.mapsUrl), source: 'google',
       rating: cleanNumber(rawLead.rating), reviewCount: cleanNumber(rawLead.reviewCount),
     };
 
@@ -453,7 +452,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return secureJson({ error: 'O provedor de IA informado não é válido.' }, 400);
     }
 
-    if (!profile.segment || !profile.city || !profile.state || !lead.id || !lead.name || !isValidPublicPhone(lead.phone) || !isValidMapsUrl(lead.mapsUrl, lead.source)) {
+    if (rawLead.source !== 'google' || !profile.segment || !profile.city || !profile.state || !lead.id || !lead.name || !isValidPublicPhone(lead.phone) || !isValidMapsUrl(lead.mapsUrl)) {
       return secureJson({ error: 'Selecione uma oportunidade com telefone e fonte pública válidos antes de gerar o prompt.' }, 400);
     }
 

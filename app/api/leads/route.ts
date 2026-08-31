@@ -30,6 +30,11 @@ type GooglePlace = {
   businessStatus?: string;
 };
 
+type GoogleResponse = {
+  places?: GooglePlace[];
+  nextPageToken?: string;
+};
+
 export type PublicLead = {
   id: string;
   name: string;
@@ -39,29 +44,8 @@ export type PublicLead = {
   phone: string;
   website: null;
   mapsUrl: string;
-  source: 'google' | 'openstreetmap';
+  source: 'google';
   verificationLabel: string;
-};
-
-type GoogleResponse = { places?: GooglePlace[]; nextPageToken?: string };
-
-type OsmElement = {
-  id: number;
-  type: 'node' | 'way' | 'relation';
-  tags?: Record<string, string>;
-};
-
-type NominatimResult = {
-  lat?: string;
-  lon?: string;
-  boundingbox?: [string, string, string, string];
-  osm_type?: 'node' | 'way' | 'relation';
-  osm_id?: number;
-  name?: string;
-  display_name?: string;
-  type?: string;
-  category?: string;
-  extratags?: Record<string, string>;
 };
 
 const ALLOWED_PROFESSIONS = new Set([
@@ -70,15 +54,14 @@ const ALLOWED_PROFESSIONS = new Set([
   'Psicologia', 'Consultoria', 'Lavanderia', 'Design de interiores', 'Seguros', 'Hotel',
   'Auto Center', 'Agência de marketing',
 ]);
-const requestWindows = new Map<string, { startedAt: number; count: number }>();
-const WINDOW_MS = 60_000;
-const MAX_REQUESTS_PER_WINDOW = 8;
 const MAX_BODY_BYTES = 2_048;
+const MAX_GOOGLE_PAGES = 3;
+const MAX_LEADS = 100;
 let rotationCursor = 0;
 
 class GoogleCredentialError extends Error {}
 
-export function buildSearchQueries(profession: string, city: string, state: string) {
+export function buildSearchQueries(profession: string, city: string, state: string): string[] {
   const normalizedProfession = profession.trim();
   const normalizedCity = city.trim();
   const normalizedState = state.trim();
@@ -95,11 +78,11 @@ export function buildSearchQueries(profession: string, city: string, state: stri
   return [...new Set(queries)];
 }
 
-export function normalizePublicPhone(value: string | undefined) {
+export function normalizePublicPhone(value: string | undefined): string {
   if (!value) return '';
 
   const firstPhone = value.split(/[;/]/)[0]?.trim() ?? '';
-  const hasInternationalPrefix = firstPhone.trim().startsWith('+');
+  const hasInternationalPrefix = firstPhone.startsWith('+');
   const digits = firstPhone.replace(/\D/g, '');
   const brazilianDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
 
@@ -120,7 +103,7 @@ export function filterLeadCandidates(results: GooglePlace[], minReviews: number)
   return [...results]
     .filter((place) => place.id)
     .filter((place) => place.businessStatus === 'OPERATIONAL')
-    .filter((place) => !place.websiteUri || !place.websiteUri.trim())
+    .filter((place) => !place.websiteUri?.trim())
     .filter((place) => Boolean(normalizePublicPhone(place.nationalPhoneNumber)))
     .filter((place) => Boolean(place.googleMapsUri?.startsWith('https://')))
     .filter((place) => (place.userRatingCount ?? 0) >= floor)
@@ -129,7 +112,7 @@ export function filterLeadCandidates(results: GooglePlace[], minReviews: number)
       name: place.displayName?.text?.trim() || 'Empresa sem nome',
       rating: typeof place.rating === 'number' ? place.rating : null,
       reviewCount: typeof place.userRatingCount === 'number' ? place.userRatingCount : null,
-      address: place.formattedAddress ?? '',
+      address: place.formattedAddress?.trim() ?? '',
       phone: normalizePublicPhone(place.nationalPhoneNumber),
       website: null,
       mapsUrl: place.googleMapsUri ?? '',
@@ -137,141 +120,7 @@ export function filterLeadCandidates(results: GooglePlace[], minReviews: number)
       verificationLabel: 'Cadastro operacional verificado no Google Maps',
     }))
     .filter((lead) => lead.name !== 'Empresa sem nome')
-    .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0) || (b.rating ?? 0) - (a.rating ?? 0));
-}
-
-const OSM_FILTERS: Record<string, string[]> = {
-  'Barbearia': ['["shop"="hairdresser"]["hairdresser"="barber"]'],
-  'Imobiliária': ['["office"="estate_agent"]'],
-  'Clínica de estética': ['["shop"="beauty"]', '["healthcare"="clinic"]["healthcare:speciality"="aesthetic"]'],
-  'Odontologia': ['["amenity"="dentist"]'],
-  'Advocacia': ['["office"="lawyer"]'],
-  'Restaurante': ['["amenity"="restaurant"]'],
-  'Academia': ['["leisure"="fitness_centre"]'],
-  'Pet shop': ['["shop"="pet"]'],
-  'Salão de beleza': ['["shop"="hairdresser"]', '["shop"="beauty"]'],
-  'Contabilidade': ['["office"="accountant"]'],
-  'Oficina mecânica': ['["shop"="car_repair"]'],
-  'Fotografia': ['["shop"="photo"]', '["craft"="photographer"]'],
-  'Psicologia': ['["healthcare"="psychotherapist"]', '["office"="therapist"]'],
-  'Consultoria': ['["office"="consulting"]'],
-  'Lavanderia': ['["shop"="laundry"]'],
-  'Design de interiores': ['["office"="interior_design"]'],
-  'Seguros': ['["office"="insurance"]'],
-  'Hotel': ['["tourism"="hotel"]'],
-  'Auto Center': ['["shop"="car_repair"]', '["shop"="tyres"]'],
-  'Agência de marketing': ['["office"="advertising_agency"]'],
-};
-
-function osmPhone(tags: Record<string, string>) {
-  return normalizePublicPhone(tags.phone || tags['contact:phone'] || tags.mobile || tags['contact:mobile']);
-}
-
-function osmAddress(tags: Record<string, string>, city: string, state: string) {
-  const street = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(', ');
-  const district = tags['addr:suburb'] || tags['addr:district'];
-  return [street, district, tags['addr:city'] || city, state].filter(Boolean).join(' · ');
-}
-
-async function fetchNominatimBusinesses(profession: string, city: string, state: string, location: NominatimResult) {
-  const terms: Record<string, string> = {
-    'Clínica de estética': 'estética', 'Salão de beleza': 'salão de beleza', 'Oficina mecânica': 'oficina mecânica',
-    'Design de interiores': 'design de interiores', 'Agência de marketing': 'agência de marketing', 'Auto Center': 'auto center',
-  };
-  const params: Record<string, string> = {
-    q: `${terms[profession] || profession}, ${city}, ${state}, Brasil`, format: 'jsonv2', countrycodes: 'br',
-    addressdetails: '1', extratags: '1', limit: '40',
-  };
-  if (location.boundingbox) {
-    const [south, north, west, east] = location.boundingbox;
-    params.viewbox = `${west},${north},${east},${south}`;
-    params.bounded = '1';
-  }
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?${new URLSearchParams(params)}`, {
-    headers: { 'User-Agent': 'LeadStudio/1.0 (business-discovery)' },
-    signal: AbortSignal.timeout(8_000),
-  });
-  if (!response.ok) return [];
-  const results = await response.json() as NominatimResult[];
-  const ignoredTypes = new Set(['footway', 'road', 'residential', 'administrative', 'city', 'town', 'village']);
-  return results
-    .filter((item) => item.osm_type && item.osm_id && item.name && !ignoredTypes.has(item.type || ''))
-    .filter((item) => !item.extratags?.website && !item.extratags?.['contact:website'])
-    .filter((item) => Boolean(normalizePublicPhone(item.extratags?.phone || item.extratags?.['contact:phone'])))
-    .map((item) => ({
-      id: `osm-${item.osm_type}-${item.osm_id}`,
-      name: item.name as string,
-      rating: null,
-      reviewCount: null,
-      address: item.display_name || `${city} · ${state}`,
-      phone: normalizePublicPhone(item.extratags?.phone || item.extratags?.['contact:phone']),
-      website: null,
-      mapsUrl: `https://www.openstreetmap.org/${item.osm_type}/${item.osm_id}`,
-      source: 'openstreetmap' as const,
-      verificationLabel: 'Cadastro público verificado no OpenStreetMap',
-    }));
-}
-
-async function fetchOpenStreetMap(profession: string, city: string, state: string) {
-  const locationResponse = await fetch(`https://nominatim.openstreetmap.org/search?${new URLSearchParams({
-    q: `${city}, ${state}, Brasil`, format: 'jsonv2', countrycodes: 'br', limit: '1',
-  })}`, {
-    headers: { 'User-Agent': 'LeadStudio/1.0 (business-discovery)' },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!locationResponse.ok) throw new Error('Não foi possível localizar a cidade.');
-  const [location] = await locationResponse.json() as NominatimResult[];
-  if (!location?.lat || !location.lon) return [];
-
-  const radius = profession === 'Barbearia' || profession === 'Salão de beleza' ? 3000 : 6000;
-  const searchArea = `around:${radius},${location.lat},${location.lon}`;
-  const filters = OSM_FILTERS[profession] ?? [];
-  const query = `[out:json][timeout:6];(${filters.map((filter) => `node${filter}["name"](${searchArea});`).join('')});out tags 100;`;
-  const endpoints = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter'];
-  let elements: OsmElement[] = [];
-  let providerResponded = false;
-
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, {
-        headers: { 'User-Agent': 'LeadStudio/1.0 (business-discovery)' },
-        signal: AbortSignal.timeout(7_000),
-      });
-      if (!response.ok) continue;
-      const payload = await response.json() as { elements?: OsmElement[] };
-      elements = payload.elements ?? [];
-      providerResponded = true;
-      break;
-    } catch { /* Try the next public Overpass endpoint. */ }
-  }
-  if (!providerResponded) return fetchNominatimBusinesses(profession, city, state, location);
-
-  return elements
-    .filter((element) => element.tags?.name)
-    .filter((element) => profession !== 'Barbearia' || /barbear|barber/i.test(element.tags?.name ?? ''))
-    .filter((element) => {
-      const tags = element.tags ?? {};
-      return !tags.website && !tags['contact:website'] && !tags.url && tags.disused !== 'yes';
-    })
-    .filter((element) => Boolean(osmPhone(element.tags ?? {})))
-    .map((element) => {
-      const tags = element.tags ?? {};
-      const phone = osmPhone(tags);
-      return {
-        id: `osm-${element.type}-${element.id}`,
-        name: tags.name,
-        rating: null,
-        reviewCount: null,
-        address: osmAddress(tags, city, state),
-        phone,
-        website: null,
-        mapsUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
-        source: 'openstreetmap' as const,
-        verificationLabel: 'Cadastro público verificado no OpenStreetMap',
-      };
-    })
-    .sort((a, b) => Number(Boolean(b.phone)) - Number(Boolean(a.phone)) || a.name.localeCompare(b.name, 'pt-BR'))
-    .slice(0, 50);
+    .sort((left, right) => (right.reviewCount ?? 0) - (left.reviewCount ?? 0) || (right.rating ?? 0) - (left.rating ?? 0));
 }
 
 function secureJson(data: unknown, status = 200) {
@@ -285,13 +134,13 @@ function secureJson(data: unknown, status = 200) {
   });
 }
 
-function cleanText(value: unknown, max = 120) {
+function cleanText(value: unknown, max = 120): string {
   return typeof value === 'string'
     ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max)
     : '';
 }
 
-function getGoogleKeys() {
+function getGoogleKeys(): string[] {
   const configured = [
     process.env.GOOGLE_PLACES_API_KEY_1,
     process.env.GOOGLE_PLACES_API_KEY_2,
@@ -303,35 +152,26 @@ function getGoogleKeys() {
   return [...new Set(configured)];
 }
 
-function isTrustedOrigin(request: NextRequest) {
+function isTrustedOrigin(request: NextRequest): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return false;
   const allowed = new Set([new URL(request.url).origin]);
   const configuredOrigin = process.env.NEXT_PUBLIC_SITE_URL;
   if (configuredOrigin) {
-    try { allowed.add(new URL(configuredOrigin).origin); } catch { /* Ignore invalid configuration. */ }
+    try {
+      allowed.add(new URL(configuredOrigin).origin);
+    } catch {
+      // Uma configuração inválida não deve ampliar as origens aceitas.
+    }
   }
   return allowed.has(origin);
 }
 
-function isRateLimited(request: NextRequest) {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const key = forwarded || request.headers.get('cf-connecting-ip') || 'anonymous';
-  const now = Date.now();
-  const current = requestWindows.get(key);
-  if (!current || now - current.startedAt >= WINDOW_MS) {
-    requestWindows.set(key, { startedAt: now, count: 1 });
-    return false;
-  }
-  current.count += 1;
-  return current.count > MAX_REQUESTS_PER_WINDOW;
-}
-
-async function fetchPlacesWithKey(apiKey: string, query: string) {
+async function fetchPlacesWithKey(apiKey: string, query: string): Promise<GooglePlace[]> {
   const places: GooglePlace[] = [];
   let pageToken = '';
 
-  for (let page = 0; page < 3; page += 1) {
+  for (let page = 0; page < MAX_GOOGLE_PAGES; page += 1) {
     const body: Record<string, unknown> = {
       textQuery: query,
       languageCode: 'pt-BR',
@@ -352,8 +192,8 @@ async function fetchPlacesWithKey(apiKey: string, query: string) {
     });
 
     if (!response.ok) {
-      if ([401, 403, 429].includes(response.status)) throw new GoogleCredentialError('Chave indisponível.');
-      throw new Error('O provedor de dados não respondeu corretamente.');
+      if ([401, 403, 429].includes(response.status)) throw new GoogleCredentialError(`google_${response.status}`);
+      throw new Error(`google_${response.status}`);
     }
 
     const payload = await response.json() as GoogleResponse;
@@ -365,11 +205,16 @@ async function fetchPlacesWithKey(apiKey: string, query: string) {
   return places;
 }
 
-async function fetchPlaces(apiKeys: string[], profession: string, city: string, state: string) {
-  const queries = buildSearchQueries(profession, city, state);
+async function fetchPlaces(
+  apiKeys: string[],
+  profession: string,
+  city: string,
+  state: string,
+  minReviews: number,
+): Promise<GooglePlace[]> {
   const unique = new Map<string, GooglePlace>();
 
-  for (const query of queries) {
+  for (const query of buildSearchQueries(profession, city, state)) {
     const start = rotationCursor % apiKeys.length;
     for (let attempt = 0; attempt < apiKeys.length; attempt += 1) {
       const index = (start + attempt) % apiKeys.length;
@@ -384,6 +229,8 @@ async function fetchPlaces(apiKeys: string[], profession: string, city: string, 
         if (!(error instanceof GoogleCredentialError) || attempt === apiKeys.length - 1) throw error;
       }
     }
+
+    if (filterLeadCandidates([...unique.values()], minReviews).length >= MAX_LEADS) break;
   }
 
   return [...unique.values()];
@@ -395,10 +242,6 @@ export async function POST(request: NextRequest) {
 
     const declaredSize = Number(request.headers.get('content-length') || 0);
     if (declaredSize > MAX_BODY_BYTES) return secureJson({ error: 'Solicitação inválida.' }, 413);
-
-    if (isRateLimited(request)) {
-      return secureJson({ error: 'Muitas pesquisas em pouco tempo. Aguarde um minuto e tente novamente.' }, 429);
-    }
 
     const body = (await request.json()) as Record<string, unknown> | null;
     const profession = cleanText(body?.profession);
@@ -412,32 +255,32 @@ export async function POST(request: NextRequest) {
 
     const apiKeys = getGoogleKeys();
     if (!apiKeys.length) {
-      const leads = await fetchOpenStreetMap(profession, city, state);
-
       return secureJson({
-        leads,
-        mode: 'openstreetmap',
-        notice: leads.length
-          ? `${leads.length} negócios com telefone público e sem site informado no OpenStreetMap. Confira cada cadastro no link da fonte.`
-          : `Nenhum negócio com telefone público e sem site informado foi encontrado em ${city}/${state} nessa fonte pública.`,
-      });
+        leads: [],
+        mode: 'blocked',
+        error: 'Google Maps ainda não está configurado. Adicione GOOGLE_PLACES_API_KEY_1 nas variáveis privadas.',
+      }, 503);
     }
 
-    const results = await fetchPlaces(apiKeys, profession, city, state);
-    const leads = filterLeadCandidates(results, minReviews).map((lead) => ({
-      ...lead,
-      address: lead.address || `${city}, ${state}`,
-    }));
+    const results = await fetchPlaces(apiKeys, profession, city, state, minReviews);
+    const leads = filterLeadCandidates(results, minReviews)
+      .slice(0, MAX_LEADS)
+      .map((lead) => ({ ...lead, address: lead.address || `${city}, ${state}` }));
 
     return secureJson({
       leads,
       mode: 'google',
       notice: leads.length
-        ? `${leads.length} empresas operacionais com telefone público e sem site informado no Google Maps, ordenadas por avaliações.`
-        : 'Nenhuma empresa operacional com telefone público e sem site atingiu o mínimo de avaliações. Tente diminuir o filtro.',
+        ? `${leads.length} empresas reais, operacionais, com telefone público e sem site informado no Google Maps.`
+        : 'Nenhuma empresa do Google Maps atingiu todos os filtros. Diminua o mínimo de avaliações ou tente outra cidade.',
     });
   } catch (error) {
-    console.error('Lead search failed:', error instanceof Error ? error.name : 'UnknownError');
-    return secureJson({ error: 'A busca real não respondeu. Tente novamente em alguns instantes.' }, 502);
+    console.error('Lead search failed:', error instanceof Error ? error.message : 'UnknownError');
+    const isProviderLimit = error instanceof GoogleCredentialError && error.message === 'google_429';
+    return secureJson({
+      error: isProviderLimit
+        ? 'A cota da conta do Google Maps foi recusada. Verifique faturamento e limite da chave na Google Cloud.'
+        : 'O Google Maps não respondeu agora. Tente novamente em alguns instantes.',
+    }, isProviderLimit ? 503 : 502);
   }
 }

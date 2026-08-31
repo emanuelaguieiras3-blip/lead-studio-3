@@ -15,18 +15,18 @@ type Lead = {
   phone: string;
   website: null;
   mapsUrl: string;
-  source: 'google' | 'openstreetmap';
+  source: 'google';
   verificationLabel: string;
 };
 
 type SearchApiResponse = {
   leads?: Lead[];
-  mode?: 'idle' | 'blocked' | 'google' | 'openstreetmap';
+  mode?: 'idle' | 'blocked' | 'google';
   notice?: string;
   error?: string;
 };
 
-type AppMode = 'idle' | 'blocked' | 'google' | 'openstreetmap';
+type AppMode = 'idle' | 'blocked' | 'google';
 
 type GenerateApiResponse = {
   prompt?: string;
@@ -104,6 +104,13 @@ const creativeDirections = [
 ];
 
 const LEADS_PER_PAGE = 8;
+
+function socialSearchUrl(platform: 'instagram' | 'facebook', lead: Lead, city: string): string {
+  const query = encodeURIComponent(`${lead.name} ${city}`);
+  return platform === 'instagram'
+    ? `https://www.instagram.com/explore/search/keyword/?q=${query}`
+    : `https://www.facebook.com/search/pages?q=${query}`;
+}
 
 function getProfessionSpecificStrategy(profession: Profession) {
   const key = profession.id.toLowerCase();
@@ -575,9 +582,9 @@ export default function Home() {
               </select>
             </label>
 
-            <div className="locked-filter"><span>✓</span><div><b>Somente cadastros com telefone</b><small>Fonte pública rastreável · Google Maps prioritário</small></div><i>ATIVO</i></div>
+            <div className="locked-filter"><span>✓</span><div><b>Somente cadastros com telefone</b><small>Fonte pública rastreável · somente Google Maps</small></div><i>ATIVO</i></div>
             <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
-            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{(mode === 'google' || mode === 'openstreetmap') && <b>DADOS REAIS · </b>}{notice}</p>
+            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{mode === 'google' && <b>DADOS REAIS · </b>}{notice}</p>
           </section>
 
           <section className="leads-panel" id="oportunidades">
@@ -590,8 +597,8 @@ export default function Home() {
               {!searching && paginatedLeads.map((lead, index) => (
                 <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => void selectOpportunity(lead)}>
                   <span className="rank-number">{String((currentLeadPage - 1) * LEADS_PER_PAGE + index + 1).padStart(2, '0')}</span>
-                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">☎ {lead.phone}</small><i>{lead.source === 'google' ? 'GOOGLE MAPS · SEM SITE' : 'OPENSTREETMAP · SEM SITE'}</i></span>
-                  <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>{lead.source === 'google' ? 'Google Places' : 'OpenStreetMap'}</small></>}</span>
+                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">☎ {lead.phone}</small><i>GOOGLE MAPS · SEM SITE</i></span>
+                  <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>Google Places</small></>}</span>
                   <span className="select-arrow">›</span>
                 </button>
               ))}
@@ -623,7 +630,9 @@ export default function Home() {
                 <span><small>{selectedLead.verificationLabel || 'TELEFONE PÚBLICO NA FONTE'}</small><b>{selectedLead.phone}</b></span>
                 <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>
                 <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>
-                <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">Ver cadastro ↗</a>
+                <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">Google Maps ↗</a>
+                <a className="instagram-link" href={socialSearchUrl('instagram', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Instagram ↗</a>
+                <a className="facebook-link" href={socialSearchUrl('facebook', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Facebook ↗</a>
               </div>
             )}
           </section>
@@ -695,7 +704,7 @@ export default function Home() {
           <section className="builder-panel" id="site-gerado">
             <div className="builder-heading">
               <div className="panel-heading"><span>05</span><div><b>Construtor integrado</b><small>O site é criado e exibido aqui, sem encaminhamento</small></div></div>
-              {siteUsage !== null && <div className="usage-chip">{siteUsage.toLocaleString('pt-BR')} tokens nesta geração</div>}
+              <div className="usage-chip">{siteUsage !== null ? `${siteUsage.toLocaleString('pt-BR')} tokens nesta geração` : 'ATÉ 24.000 TOKENS POR SITE'}</div>
             </div>
 
             <div className="builder-options">
@@ -703,7 +712,7 @@ export default function Home() {
                 <span className="builder-badge">RECOMENDADO</span>
                 <div className="builder-logo">IA</div>
                 <h3>Criar site aqui</h3>
-                <p>Usa Kimi quando estiver configurada e OpenAI como opção interna. Gera, isola, mostra e permite baixar o HTML sem abrir outra plataforma.</p>
+                <p>Usa Kimi quando estiver configurada e OpenAI como opção interna, com até 24.000 tokens de saída. Gera, mostra e permite baixar o HTML sem abrir outra plataforma.</p>
                 <button type="button" onClick={() => void buildSite('internal')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
                   {buildingSite === 'internal' ? 'Criando dentro do Lead Studio...' : 'Criar e visualizar agora'}
                 </button>

@@ -36,20 +36,23 @@ test('buildCompactSitePrompt requires verified data and a complete standalone pa
   assert.match(prompt, /NEGÓCIO: exemplo verificado/);
 });
 
-test('POST keeps the internal builder closed when no private provider key exists', async () => {
+test('POST does not apply a shared anonymous click limit when no private provider key exists', async () => {
   const previousOpenAI = process.env.OPENAI_API_KEY;
   const previousKimi = process.env.MOONSHOT_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.MOONSHOT_API_KEY;
   try {
-    const request = new NextRequest('http://localhost:3000/api/build-site', {
-      method: 'POST',
-      headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'build', provider: 'auto', prompt: 'Brief verificado. '.repeat(40) }),
-    });
-    const response = await POST(request);
-    assert.equal(response.status, 503);
-    assert.equal((await response.json()).code, 'provider_not_configured');
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const request = new NextRequest('http://localhost:3000/api/build-site', {
+        method: 'POST',
+        headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'build', provider: 'auto', prompt: 'Brief verificado. '.repeat(40) }),
+      });
+      const response = await POST(request);
+      const payload = await response.json() as { code?: string };
+      assert.equal(response.status, 503);
+      assert.equal(payload.code, 'provider_not_configured');
+    }
   } finally {
     if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAI;
