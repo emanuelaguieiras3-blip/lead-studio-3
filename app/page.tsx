@@ -56,8 +56,8 @@ type BuildSiteApiResponse = {
 };
 
 type CursorJob = { agentId: string; runId: string; trackingToken: string };
-type BuilderAiProvider = 'auto' | 'claude' | 'gpt';
-type PuterCodingModel = 'claude-sonnet-4-6' | 'gpt-5.6-luna';
+type BuilderAiProvider = 'auto' | 'claude';
+type PuterCodingModel = 'claude-sonnet-4-6';
 
 type PuterClient = {
   ai: {
@@ -116,7 +116,7 @@ function extractPuterText(result: unknown): string {
 }
 
 function buildPuterCodingPrompt(brief: string): string {
-  return `Você é um engenheiro frontend sênior especializado em landing pages de alta conversão. Gere somente um documento HTML5 completo começando por <!doctype html>. Inclua CSS e JavaScript no próprio arquivo, sem bibliotecas, fontes, iframes ou scripts externos. Use português do Brasil, layout mobile first, acessível e responsivo. Não invente telefone, endereço, avaliações, serviços, preços, equipe ou depoimentos. Omita dados ausentes ou marque [VALIDAR COM O NEGÓCIO]. Não faça requisições de rede nem simule envio de formulários. Respeite prefers-reduced-motion e contraste WCAG AA.\n\nESPECIFICAÇÃO VERIFICADA:\n${brief}`;
+  return `Crie uma landing page compacta em no máximo 900 tokens. Retorne somente HTML5 completo, começando por <!doctype html>, com CSS interno e sem recursos externos. Priorize: hero, três benefícios, dados reais de contato/localização e CTA. Use português do Brasil, mobile first, contraste acessível e pouco JavaScript. Não invente fatos; omita dados ausentes. O HTML precisa terminar corretamente mesmo que seja simples.\n\nDADOS E DIREÇÃO:\n${brief.slice(0, 6_000)}`;
 }
 
 async function createSiteWithPuter(brief: string, model: PuterCodingModel): Promise<BuildSiteApiResponse> {
@@ -126,7 +126,7 @@ async function createSiteWithPuter(brief: string, model: PuterCodingModel): Prom
     { role: 'user', content: buildPuterCodingPrompt(brief) },
   ], {
     model,
-    max_tokens: 16_000,
+    max_tokens: 950,
     temperature: 0.2,
   });
   const rawContent = extractPuterText(result);
@@ -547,8 +547,8 @@ export default function Home() {
     try {
       let data: BuildSiteApiResponse;
       if (provider === 'internal' && builderAiProvider !== 'auto') {
-        const model: PuterCodingModel = builderAiProvider === 'gpt' ? 'gpt-5.6-luna' : 'claude-sonnet-4-6';
-        setSiteBuildNotice(`Conectando ao ${builderAiProvider === 'gpt' ? 'GPT-5.6 Luna' : 'Claude Sonnet 4.6'}...`);
+        const model: PuterCodingModel = 'claude-sonnet-4-6';
+        setSiteBuildNotice('Conectando ao Claude Sonnet 4.6 em modo rápido...');
         data = await createSiteWithPuter(generatedBrief, model);
       } else {
         const response = await fetch('/api/build-site', {
@@ -570,9 +570,7 @@ export default function Home() {
         setGeneratedSiteHtml(data.html);
         setGeneratedSiteProvider(data.provider === 'kimi'
           ? 'Kimi'
-          : data.model === 'gpt-5.6-luna'
-            ? 'GPT-5.6 Luna'
-            : data.provider === 'puter'
+          : data.provider === 'puter'
               ? 'Claude Sonnet 4.6'
               : 'OpenAI');
         setSiteUsage(data.usage?.total ?? null);
@@ -810,7 +808,7 @@ export default function Home() {
           <section className="builder-panel" id="site-gerado">
             <div className="builder-heading">
               <div className="panel-heading"><span>05</span><div><b>Construtor integrado</b><small>O site é criado e exibido aqui, sem encaminhamento</small></div></div>
-              <div className="usage-chip">{siteUsage !== null ? `${siteUsage.toLocaleString('pt-BR')} tokens nesta geração` : 'ATÉ 24.000 TOKENS POR SITE'}</div>
+              <div className="usage-chip">{siteUsage !== null ? `${siteUsage.toLocaleString('pt-BR')} tokens nesta geração` : 'MODO RÁPIDO · ATÉ 1.000 TOKENS'}</div>
             </div>
 
             <div className="provider-control" style={{ marginBottom: 18 }}>
@@ -818,7 +816,6 @@ export default function Home() {
               <div className="profession-strip" role="group" aria-label="Provedor de IA do construtor">
                 {([
                   ['claude', 'C', 'Claude Sonnet 4.6'],
-                  ['gpt', 'O', 'GPT-5.6 Luna'],
                   ['auto', '✦', 'Automático'],
                 ] as const).map(([value, icon, label]) => (
                   <button
@@ -834,10 +831,8 @@ export default function Home() {
               </div>
               <div className="provider-recommendation">
                 {builderAiProvider === 'claude'
-                  ? 'Recomendado para código e design. Pode solicitar login da Puter no primeiro uso.'
-                  : builderAiProvider === 'gpt'
-                    ? 'Alternativa rápida para gerar HTML completo. Pode solicitar login da Puter no primeiro uso.'
-                    : 'Tenta Kimi/OpenAI privados e usa Claude automaticamente se estiverem indisponíveis.'}
+                  ? 'Modo rápido: prompt reduzido e HTML completo em até 1.000 tokens. Pode solicitar login da Puter.'
+                  : 'Tenta Kimi/OpenAI privados e usa Claude rápido automaticamente se estiverem indisponíveis.'}
               </div>
             </div>
 
@@ -845,8 +840,8 @@ export default function Home() {
               <article className="builder-option recommended">
                 <span className="builder-badge">RECOMENDADO</span>
                 <div className="builder-logo">IA</div>
-                <h3>Claude Sonnet para código</h3>
-                <p>Gera o site completo dentro do Lead Studio. Usa OpenAI ou Kimi quando configuradas e ativa Claude Sonnet 4.6 como alternativa integrada. No primeiro uso, a Puter pode solicitar login para autorizar a IA.</p>
+                <h3>Claude Sonnet rápido</h3>
+                <p>Gera um site compacto e completo com até 1.000 tokens, reduzindo espera e evitando respostas cortadas. A prévia continua dentro do Lead Studio.</p>
                 <button type="button" onClick={() => void buildSite('internal')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
                   {buildingSite === 'internal' ? 'Claude está programando...' : 'Criar e visualizar agora'}
                 </button>
