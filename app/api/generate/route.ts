@@ -148,7 +148,7 @@ export function buildOpportunityPrompt(profile: Record<string, string>, lead: Le
   const phoneFact = lead.phone || 'telefone não informado na fonte';
   const sourceLabel = lead.source === 'google' ? 'Google Places' : 'OpenStreetMap';
 
-  return `# PROMPT DE PRODUÇÃO — ${lead.name}
+  const detailedPrompt = `# PROMPT DE PRODUÇÃO — ${lead.name}
 
 Crie uma landing page autoral, premium e de alta conversão para **${lead.name}**, um negócio real de **${profile.segment}** em **${profile.city}/${profile.state}**. Use como referência de nível — sem copiar layout, texto ou identidade — a capacidade do projeto Aether 1 de unir storytelling de marca, interações avançadas e tecnologia em uma experiência digital marcante.
 
@@ -283,6 +283,19 @@ Entregue a página completa, pronta para produção, com copy final e direção 
 6. lista curta de perguntas que ainda precisam ser respondidas pelo proprietário.
 
 Antes de finalizar, faça uma auditoria factual: toda afirmação sobre ${lead.name} deve ser rastreável aos dados verificados acima. Variação criativa: ${variation + 1}-${seed.toString(36).slice(0, 6)}.`;
+
+  const compactEnd = detailedPrompt.lastIndexOf('\n', 3_500);
+  const compactCore = detailedPrompt.slice(0, compactEnd > 0 ? compactEnd : 3_500).trimEnd();
+  return `${compactCore}
+
+## ENTREGA COMPACTA E OBRIGATÓRIA
+- Gere uma landing page completa, mobile first, rápida e acessível.
+- Inclua hero, três benefícios, confiança baseada somente nos dados verificados, localização, contato real, FAQ curto e CTA final.
+- Use HTML semântico, CSS enxuto e JavaScript apenas quando necessário. Não use recursos externos no HTML autônomo.
+- Não invente serviços, preços, horários, equipe, depoimentos ou resultados; não criar WhatsApp nem redes sociais. Dado ausente deve ser omitido ou marcado [VALIDAR COM O NEGÓCIO].
+- Telefone e link do mapa devem ser exatamente os informados acima. Não crie outro número ou URL.
+- Entregue primeiro a implementação completa; seja breve nas explicações.
+- Faça auditoria factual antes de finalizar. Variação: ${variation + 1}-${seed.toString(36).slice(0, 6)}.`;
 }
 
 function extractResponseText(result: { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> }): string {

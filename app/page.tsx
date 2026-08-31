@@ -317,8 +317,6 @@ export default function Home() {
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [activeDirection, setActiveDirection] = useState('cinematic');
   const [variation, setVariation] = useState(0);
-  const [aiProvider, setAiProvider] = useState<'local' | 'auto' | 'openai' | 'claude' | 'gemini'>('local');
-  const [activeAiProvider, setActiveAiProvider] = useState('local');
   const [generatedBrief, setGeneratedBrief] = useState('');
   const [buildingSite, setBuildingSite] = useState<'internal' | 'cursor' | null>(null);
   const [generatedSiteHtml, setGeneratedSiteHtml] = useState('');
@@ -404,7 +402,6 @@ export default function Home() {
   function resetResults(message?: string) {
     setCopied(false);
     setGeneratedBrief('');
-    setActiveAiProvider('local');
     setGeneratedSiteHtml('');
     setGeneratedSiteProvider('');
     setSiteUsage(null);
@@ -455,7 +452,6 @@ export default function Home() {
     direction = activeDirection,
     leadOverride?: Lead,
     variationOverride = variation,
-    providerOverride = aiProvider,
   ) {
     const lead = leadOverride ?? selectedLead;
     if (!lead) {
@@ -476,7 +472,7 @@ export default function Home() {
           state: state.sigla,
           lead,
           direction,
-          provider: providerOverride,
+          provider: 'local',
           variation: variationOverride,
         }),
       });
@@ -485,13 +481,11 @@ export default function Home() {
       if (generationRequest.current !== requestId) return '';
       const nextPrompt = data.prompt;
       setGeneratedBrief(nextPrompt);
-      setActiveAiProvider(data.provider ?? 'local');
       setNotice(data.notice || `Texto exclusivo criado para ${lead.name}.`);
       return nextPrompt;
     } catch (error) {
       if (generationRequest.current === requestId) {
         setGeneratedBrief('');
-        setActiveAiProvider('local');
         setNotice(error instanceof Error ? error.message : 'Não foi possível gerar o brief.');
       }
       return '';
@@ -743,7 +737,7 @@ export default function Home() {
 
           <section className="ai-panel" id="direcao">
             <div className="panel-heading"><span>03</span><div><b>Direção criativa</b><small>Cada caminho muda narrativa, copy e interação</small></div></div>
-            <div className="ranking-note">Selecione uma direção para regenerar um prompt realmente diferente. Para código complexo, Auto prioriza OpenAI; Claude é uma ótima opção para narrativa e copy.</div>
+            <div className="ranking-note">Selecione uma direção para gerar automaticamente um prompt compacto, exclusivo e baseado apenas nos dados reais da oportunidade.</div>
             <div className="ai-list">
               {creativeDirections.map((direction, index) => (
                 <button
@@ -764,30 +758,6 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="provider-control" style={{ marginTop: 16 }}>
-              <label className="field-label">PROVEDOR DE IA</label>
-              <div className="profession-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
-                {(['local', 'auto', 'openai', 'claude', 'gemini'] as const).map((provider) => (
-                  <button
-                    key={provider}
-                    type="button"
-                    className={aiProvider === provider ? 'profession active' : 'profession'}
-                    onClick={async () => {
-                      setAiProvider(provider);
-                      if (selectedLead) await generateIntegratedPrompt(activeDirection, selectedLead, variation, provider);
-                    }}
-                  >
-                    <span>{provider === 'claude' ? 'C' : provider === 'gemini' ? 'G' : provider === 'openai' ? 'O' : provider === 'local' ? '0' : '✦'}</span>
-                    {provider === 'local' ? 'Local · zero tokens' : provider === 'auto' ? 'Auto · melhor IA' : provider === 'claude' ? 'Claude' : provider === 'gemini' ? 'Gemini' : 'OpenAI · código'}
-                  </button>
-                ))}
-              </div>
-              <div className="provider-recommendation">
-                <b>Integração resiliente</b>
-                <p>Com chave configurada, a IA acrescenta direção criativa ao prompt. Sem chave, o gerador local detalhado continua funcionando para todos.</p>
-                <span>Ativo agora: {activeAiProvider === 'local' ? 'gerador local seguro' : activeAiProvider}</span>
-              </div>
-            </div>
           </section>
 
           <section className="prompt-panel" id="brief">
@@ -799,7 +769,7 @@ export default function Home() {
               </div>
             </div>
             <div className="prompt-code">
-              <div className="prompt-top"><span>prompt-site.md · {activeAiProvider}</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
+              <div className="prompt-top"><span>prompt-site.md · automático compacto</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
               <textarea className="prompt-editor" value={activePrompt} onChange={(event) => setGeneratedBrief(event.target.value)} aria-label="Prompt do site" />
             </div>
             <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Fonte pública rastreável</span><span>Auditoria factual</span><span>Pronto para Codex, Claude e outras IAs</span></div>

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { buildOpportunityPrompt } from '../app/api/generate/route.ts';
 
-test('buildOpportunityPrompt creates a detailed, source-grounded website brief', () => {
+test('buildOpportunityPrompt creates a compact, source-grounded website brief', () => {
   const prompt = buildOpportunityPrompt(
     { segment: 'Barbearia', city: 'São Paulo', state: 'SP' },
     {
@@ -20,7 +20,8 @@ test('buildOpportunityPrompt creates a detailed, source-grounded website brief',
     0,
   );
 
-  assert.ok(prompt.length > 9_000);
+  assert.ok(prompt.length >= 3_000);
+  assert.ok(prompt.length <= 4_800);
   assert.match(prompt, /DADOS VERIFICADOS/);
   assert.match(prompt, /AUDITORIA FACTUAL/i);
   assert.match(prompt, /\+55 \(11\) 99999-0000/);
