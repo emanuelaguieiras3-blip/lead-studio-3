@@ -15,18 +15,18 @@ type Lead = {
   phone: string;
   website: null;
   mapsUrl: string;
-  source: 'google';
+  source: 'google' | 'openstreetmap';
   verificationLabel: string;
 };
 
 type SearchApiResponse = {
   leads?: Lead[];
-  mode?: 'idle' | 'blocked' | 'google';
+  mode?: 'idle' | 'blocked' | 'google' | 'openstreetmap';
   notice?: string;
   error?: string;
 };
 
-type AppMode = 'idle' | 'blocked' | 'google';
+type AppMode = 'idle' | 'blocked' | 'google' | 'openstreetmap';
 
 type GenerateApiResponse = {
   prompt?: string;
@@ -224,7 +224,7 @@ export default function Home() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [loadingCities, setLoadingCities] = useState(true);
   const [searching, setSearching] = useState(false);
-  const [notice, setNotice] = useState('Os resultados serão consultados diretamente no Google Places.');
+  const [notice, setNotice] = useState('Os resultados serão consultados em fontes públicas rastreáveis.');
   const [mode, setMode] = useState<AppMode>('idle');
   const [copied, setCopied] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -524,7 +524,7 @@ export default function Home() {
             <span className="kicker">PROSPECÇÃO + CRIAÇÃO</span>
             <h2>Encontre o negócio certo.<br /><em>Crie o site perfeito.</em></h2>
           </div>
-          <p>Selecione uma profissão e uma cidade. O radar consulta empresas reais no Google, filtra quem não informa site e prepara o prompt para a melhor IA.</p>
+          <p>Selecione uma profissão e uma cidade. O radar consulta cadastros públicos reais, filtra quem não informa site e prepara o prompt para a melhor IA.</p>
         </section>
 
         <div className="insight-bar" aria-label="Resumo do fluxo">
@@ -582,9 +582,9 @@ export default function Home() {
               </select>
             </label>
 
-            <div className="locked-filter"><span>✓</span><div><b>Somente cadastros com telefone</b><small>Fonte pública rastreável · somente Google Maps</small></div><i>ATIVO</i></div>
+            <div className="locked-filter"><span>✓</span><div><b>Cadastros reais sem site informado</b><small>Telefone exibido quando disponível · OpenStreetMap</small></div><i>ATIVO</i></div>
             <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
-            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{mode === 'google' && <b>DADOS REAIS · </b>}{notice}</p>
+            <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{(mode === 'google' || mode === 'openstreetmap') && <b>DADOS REAIS · </b>}{notice}</p>
           </section>
 
           <section className="leads-panel" id="oportunidades">
@@ -597,8 +597,8 @@ export default function Home() {
               {!searching && paginatedLeads.map((lead, index) => (
                 <button key={lead.id} className={selectedLead?.id === lead.id ? 'lead-row selected' : 'lead-row'} onClick={() => void selectOpportunity(lead)}>
                   <span className="rank-number">{String((currentLeadPage - 1) * LEADS_PER_PAGE + index + 1).padStart(2, '0')}</span>
-                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">☎ {lead.phone}</small><i>GOOGLE MAPS · SEM SITE</i></span>
-                  <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>Google Places</small></>}</span>
+                  <span className="lead-main"><b>{lead.name}</b><small>{lead.address}</small><small className="phone-line">{lead.phone ? `☎ ${lead.phone}` : 'Telefone não informado na fonte'}</small><i>{lead.source === 'google' ? 'GOOGLE MAPS · SEM SITE' : 'OPENSTREETMAP · SEM SITE'}</i></span>
+                  <span className="rating">{lead.rating !== null && lead.reviewCount !== null ? <><b>{lead.rating.toFixed(1)} ★</b><small>{lead.reviewCount.toLocaleString('pt-BR')} avaliações</small></> : <><b>REAL</b><small>{lead.source === 'google' ? 'Google Places' : 'OpenStreetMap'}</small></>}</span>
                   <span className="select-arrow">›</span>
                 </button>
               ))}
@@ -627,10 +627,10 @@ export default function Home() {
             )}
             {selectedLead && (
               <div className="contact-bar">
-                <span><small>{selectedLead.verificationLabel || 'TELEFONE PÚBLICO NA FONTE'}</small><b>{selectedLead.phone}</b></span>
-                <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>
-                <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>
-                <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">Google Maps ↗</a>
+                <span><small>{selectedLead.verificationLabel || 'CADASTRO PÚBLICO VERIFICADO'}</small><b>{selectedLead.phone || 'Telefone não informado'}</b></span>
+                {selectedLead.phone && <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>}
+                {selectedLead.phone && <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>}
+                <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">{selectedLead.source === 'google' ? 'Google Maps' : 'OpenStreetMap'} ↗</a>
                 <a className="instagram-link" href={socialSearchUrl('instagram', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Instagram ↗</a>
                 <a className="facebook-link" href={socialSearchUrl('facebook', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Facebook ↗</a>
               </div>
@@ -698,7 +698,7 @@ export default function Home() {
               <div className="prompt-top"><span>prompt-site.md · {activeAiProvider}</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
               <textarea className="prompt-editor" value={activePrompt} onChange={(event) => setGeneratedBrief(event.target.value)} aria-label="Prompt do site" />
             </div>
-            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Google Maps prioritário</span><span>Auditoria factual</span><span>Pronto para Codex, Claude e outras IAs</span></div>
+            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Fonte pública rastreável</span><span>Auditoria factual</span><span>Pronto para Codex, Claude e outras IAs</span></div>
           </section>
 
           <section className="builder-panel" id="site-gerado">

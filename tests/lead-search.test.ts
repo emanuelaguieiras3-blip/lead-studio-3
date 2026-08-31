@@ -89,13 +89,33 @@ test('normalizePublicPhone accepts Brazilian public numbers and removes invalid 
   assert.equal(normalizePublicPhone('12345'), '');
 });
 
-test('lead search stays Google-only and does not share an anonymous click limit', async () => {
+test('lead search falls back to real OpenStreetMap records without a shared anonymous click limit', async () => {
   const keyNames = [
     'GOOGLE_PLACES_API_KEY_1', 'GOOGLE_PLACES_API_KEY_2', 'GOOGLE_PLACES_API_KEY_3',
     'GOOGLE_PLACES_API_KEY_4', 'GOOGLE_PLACES_API_KEY_5', 'GOOGLE_PLACES_API_KEY',
   ] as const;
   const previous = new Map(keyNames.map((key) => [key, process.env[key]]));
+  const previousFetch = globalThis.fetch;
   for (const key of keyNames) delete process.env[key];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.includes('nominatim.openstreetmap.org')) {
+      return new Response(JSON.stringify([{
+        lat: '-23.5505', lon: '-46.6333', boundingbox: ['-23.8', '-23.3', '-46.9', '-46.3'],
+      }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (url.includes('overpass')) {
+      return new Response(JSON.stringify({ elements: [{
+        id: 123,
+        type: 'node',
+        tags: {
+          name: 'Barbearia Pública Teste',
+          'addr:street': 'Rua Pública', 'addr:housenumber': '10', 'addr:city': 'São Paulo',
+        },
+      }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  }) as typeof fetch;
 
   try {
     for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -105,12 +125,16 @@ test('lead search stays Google-only and does not share an anonymous click limit'
         body: JSON.stringify({ profession: 'Barbearia', city: 'São Paulo', state: 'São Paulo', minReviews: 30 }),
       });
       const response = await searchLeads(request);
-      const payload = await response.json() as { mode?: string; error?: string };
-      assert.equal(response.status, 503);
-      assert.equal(payload.mode, 'blocked');
-      assert.match(payload.error ?? '', /Google Maps/);
+      const payload = await response.json() as { mode?: string; leads?: Array<{ source?: string; mapsUrl?: string; phone?: string }> };
+      assert.equal(response.status, 200);
+      assert.equal(payload.mode, 'openstreetmap');
+      assert.equal(payload.leads?.length, 1);
+      assert.equal(payload.leads?.[0]?.source, 'openstreetmap');
+      assert.equal(payload.leads?.[0]?.phone, '');
+      assert.match(payload.leads?.[0]?.mapsUrl ?? '', /^https:\/\/www\.openstreetmap\.org\//);
     }
   } finally {
+    globalThis.fetch = previousFetch;
     for (const key of keyNames) {
       const value = previous.get(key);
       if (value === undefined) delete process.env[key];
