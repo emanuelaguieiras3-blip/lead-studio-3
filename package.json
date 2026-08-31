@@ -10,7 +10,7 @@
     "build": "next build && vite build",
     "start": "next start",
     "test": "node --test tests/*.test.ts",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vercel"
+    "lint": "eslint app tests next.config.ts vite.config.ts"
   },
   "dependencies": {
     "next": "16.3.3",

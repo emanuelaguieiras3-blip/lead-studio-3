@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server.js';
 
-const MAX_BODY_BYTES = 36_000;
+const MAX_BODY_BYTES = 260_000;
 const MAX_PROMPT_LENGTH = 24_000;
 const MAX_HTML_LENGTH = 240_000;
 const MAX_SITE_OUTPUT_TOKENS = 24_000;
 
-type BuildAction = 'build' | 'cursor' | 'cursor_status';
+type BuildAction = 'build' | 'cursor' | 'cursor_status' | 'sanitize';
 type DirectProvider = 'auto' | 'kimi' | 'openai';
 type Usage = { input: number | null; output: number | null; total: number | null; cached: number | null };
 type KimiResponse = {
@@ -389,7 +389,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (declaredSize > MAX_BODY_BYTES) return secureJson({ error: 'Solicitação muito grande.' }, 413);
     const body = await request.json() as Record<string, unknown> | null;
     const action = cleanText(body?.action, 30) as BuildAction;
-    if (!['build', 'cursor', 'cursor_status'].includes(action)) return secureJson({ error: 'Ação de construção inválida.' }, 400);
+    if (!['build', 'cursor', 'cursor_status', 'sanitize'].includes(action)) return secureJson({ error: 'Ação de construção inválida.' }, 400);
+    if (action === 'sanitize') {
+      const rawContent = cleanText(body?.rawContent, MAX_HTML_LENGTH);
+      const html = extractSafeHtml(rawContent);
+      if (!html) return secureJson({ error: 'A IA não entregou um HTML completo e seguro. Tente gerar novamente.' }, 422);
+      return secureJson({
+        provider: 'puter',
+        model: 'claude-sonnet-4-6',
+        html,
+        notice: 'Site criado com Claude Sonnet e validado dentro do Lead Studio.',
+      });
+    }
     if (action === 'cursor_status') return cursorStatus(body ?? {});
     const prompt = cleanText(body?.prompt);
     if (prompt.length < 400) return secureJson({ error: 'Gere e revise o prompt antes de criar o site.' }, 400);

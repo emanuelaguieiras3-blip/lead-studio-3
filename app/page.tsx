@@ -39,7 +39,8 @@ type GenerateApiResponse = {
 };
 
 type BuildSiteApiResponse = {
-  provider?: 'kimi' | 'openai' | 'cursor';
+  provider?: 'kimi' | 'openai' | 'cursor' | 'puter';
+  code?: string;
   model?: string;
   html?: string;
   usage?: { input: number | null; output: number | null; total: number | null; cached: number | null };
@@ -55,6 +56,89 @@ type BuildSiteApiResponse = {
 };
 
 type CursorJob = { agentId: string; runId: string; trackingToken: string };
+
+type PuterClient = {
+  ai: {
+    chat: (messages: Array<{ role: 'system' | 'user'; content: string }>, options: {
+      model: string;
+      max_tokens: number;
+      temperature: number;
+    }) => Promise<unknown>;
+  };
+};
+
+let puterLoader: Promise<PuterClient> | null = null;
+
+function getPuterClient(): PuterClient | undefined {
+  return (window as typeof window & { puter?: PuterClient }).puter;
+}
+
+function loadPuterClient(): Promise<PuterClient> {
+  const activeClient = getPuterClient();
+  if (activeClient) return Promise.resolve(activeClient);
+  if (puterLoader) return puterLoader;
+
+  puterLoader = new Promise<PuterClient>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-lead-studio-puter]');
+    const script = existingScript || document.createElement('script');
+    const handleLoad = () => {
+      const client = getPuterClient();
+      if (client) resolve(client);
+      else reject(new Error('A integração de IA não carregou corretamente.'));
+    };
+    script.addEventListener('load', handleLoad, { once: true });
+    script.addEventListener('error', () => reject(new Error('Não foi possível carregar a IA de programação.')), { once: true });
+    if (!existingScript) {
+      script.src = 'https://js.puter.com/v2/';
+      script.async = true;
+      script.dataset.leadStudioPuter = 'true';
+      document.head.appendChild(script);
+    }
+  });
+  return puterLoader;
+}
+
+function extractPuterText(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object') return '';
+  const response = result as { text?: unknown; message?: { content?: unknown } };
+  if (typeof response.text === 'string') return response.text;
+  const content = response.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((item) => {
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') return item.text;
+    return '';
+  }).join('\n').trim();
+}
+
+function buildPuterCodingPrompt(brief: string): string {
+  return `Você é um engenheiro frontend sênior especializado em landing pages de alta conversão. Gere somente um documento HTML5 completo começando por <!doctype html>. Inclua CSS e JavaScript no próprio arquivo, sem bibliotecas, fontes, iframes ou scripts externos. Use português do Brasil, layout mobile first, acessível e responsivo. Não invente telefone, endereço, avaliações, serviços, preços, equipe ou depoimentos. Omita dados ausentes ou marque [VALIDAR COM O NEGÓCIO]. Não faça requisições de rede nem simule envio de formulários. Respeite prefers-reduced-motion e contraste WCAG AA.\n\nESPECIFICAÇÃO VERIFICADA:\n${brief}`;
+}
+
+async function createSiteWithPuter(brief: string): Promise<BuildSiteApiResponse> {
+  const client = await loadPuterClient();
+  const result = await client.ai.chat([
+    { role: 'system', content: 'Você é um excelente engenheiro frontend. Responda somente com o HTML completo solicitado.' },
+    { role: 'user', content: buildPuterCodingPrompt(brief) },
+  ], {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 16_000,
+    temperature: 0.2,
+  });
+  const rawContent = extractPuterText(result);
+  if (!rawContent) throw new Error('Claude não retornou o código do site. Tente novamente.');
+
+  const response = await fetch('/api/build-site', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'sanitize', rawContent }),
+  });
+  const data = await response.json() as BuildSiteApiResponse;
+  if (!response.ok || !data.html) throw new Error(data.error || 'O código gerado não passou pela validação de segurança.');
+  return data;
+}
 
 const states: StateOption[] = [
   { id: 12, sigla: 'AC', nome: 'Acre' }, { id: 27, sigla: 'AL', nome: 'Alagoas' },
@@ -463,12 +547,18 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: provider === 'internal' ? 'build' : 'cursor', provider: 'auto', prompt: generatedBrief }),
       });
-      const data = await response.json() as BuildSiteApiResponse;
-      if (!response.ok) throw new Error(data.error || 'Não foi possível criar o site.');
+      const serverData = await response.json() as BuildSiteApiResponse;
+      let data = serverData;
+      if (provider === 'internal' && (!response.ok || !serverData.html)) {
+        setSiteBuildNotice('Conectando ao Claude Sonnet para gerar o código do site...');
+        data = await createSiteWithPuter(generatedBrief);
+      } else if (!response.ok) {
+        throw new Error(serverData.error || 'Não foi possível criar o site.');
+      }
 
       if (provider === 'internal' && data.html) {
         setGeneratedSiteHtml(data.html);
-        setGeneratedSiteProvider(data.provider === 'kimi' ? 'Kimi' : 'OpenAI');
+        setGeneratedSiteProvider(data.provider === 'kimi' ? 'Kimi' : data.provider === 'puter' ? 'Claude Sonnet 4.6' : 'OpenAI');
         setSiteUsage(data.usage?.total ?? null);
         window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
       }
@@ -711,10 +801,10 @@ export default function Home() {
               <article className="builder-option recommended">
                 <span className="builder-badge">RECOMENDADO</span>
                 <div className="builder-logo">IA</div>
-                <h3>Criar site aqui</h3>
-                <p>Usa Kimi quando estiver configurada e OpenAI como opção interna, com até 24.000 tokens de saída. Gera, mostra e permite baixar o HTML sem abrir outra plataforma.</p>
+                <h3>Claude Sonnet para código</h3>
+                <p>Gera o site completo dentro do Lead Studio. Usa OpenAI ou Kimi quando configuradas e ativa Claude Sonnet 4.6 como alternativa integrada. No primeiro uso, a Puter pode solicitar login para autorizar a IA.</p>
                 <button type="button" onClick={() => void buildSite('internal')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
-                  {buildingSite === 'internal' ? 'Criando dentro do Lead Studio...' : 'Criar e visualizar agora'}
+                  {buildingSite === 'internal' ? 'Claude está programando...' : 'Criar e visualizar agora'}
                 </button>
               </article>
 
