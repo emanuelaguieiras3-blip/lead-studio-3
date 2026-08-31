@@ -39,14 +39,22 @@ type GenerateApiResponse = {
 };
 
 type BuildSiteApiResponse = {
-  provider?: 'kimi' | 'cursor';
+  provider?: 'kimi' | 'openai' | 'cursor';
+  model?: string;
   html?: string;
   usage?: { input: number | null; output: number | null; total: number | null; cached: number | null };
-  agentUrl?: string;
+  agentId?: string;
+  runId?: string;
+  trackingToken?: string;
   status?: string;
+  done?: boolean;
+  result?: string | null;
+  prUrl?: string | null;
   notice?: string;
   error?: string;
 };
+
+type CursorJob = { agentId: string; runId: string; trackingToken: string };
 
 const states: StateOption[] = [
   { id: 12, sigla: 'AC', nome: 'Acre' }, { id: 27, sigla: 'AL', nome: 'Alagoas' },
@@ -219,11 +227,15 @@ export default function Home() {
   const [aiProvider, setAiProvider] = useState<'local' | 'auto' | 'openai' | 'claude' | 'gemini'>('local');
   const [activeAiProvider, setActiveAiProvider] = useState('local');
   const [generatedBrief, setGeneratedBrief] = useState('');
-  const [buildingSite, setBuildingSite] = useState<'kimi' | 'cursor' | null>(null);
+  const [buildingSite, setBuildingSite] = useState<'internal' | 'cursor' | null>(null);
   const [generatedSiteHtml, setGeneratedSiteHtml] = useState('');
-  const [siteBuildNotice, setSiteBuildNotice] = useState('Gere um prompt e escolha onde construir o site.');
+  const [generatedSiteProvider, setGeneratedSiteProvider] = useState('');
+  const [siteBuildNotice, setSiteBuildNotice] = useState('Gere um prompt e construa o site sem sair do Lead Studio.');
   const [siteUsage, setSiteUsage] = useState<number | null>(null);
-  const [cursorAgentUrl, setCursorAgentUrl] = useState('');
+  const [cursorJob, setCursorJob] = useState<CursorJob | null>(null);
+  const [cursorStatus, setCursorStatus] = useState('');
+  const [cursorResult, setCursorResult] = useState('');
+  const [cursorPrUrl, setCursorPrUrl] = useState('');
   const generationRequest = useRef(0);
 
   const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
@@ -251,13 +263,61 @@ export default function Home() {
     return () => controller.abort();
   }, [stateId]);
 
+  useEffect(() => {
+    if (!cursorJob) return undefined;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function pollCursor(): Promise<void> {
+      try {
+        const response = await fetch('/api/build-site', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cursor_status', ...cursorJob }),
+        });
+        const data = await response.json() as BuildSiteApiResponse;
+        if (!response.ok) throw new Error(data.error || 'Não foi possível acompanhar o Cursor.');
+        if (cancelled) return;
+
+        setCursorStatus(data.status || 'RUNNING');
+        setSiteBuildNotice(data.notice || 'Cursor trabalhando dentro do Lead Studio.');
+        if (data.result) setCursorResult(data.result);
+        if (data.prUrl) setCursorPrUrl(data.prUrl);
+        if (data.html) {
+          setGeneratedSiteHtml(data.html);
+          setGeneratedSiteProvider('Cursor');
+          window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
+        }
+        if (data.done) {
+          setCursorJob(null);
+          return;
+        }
+        timer = window.setTimeout(() => void pollCursor(), 5_000);
+      } catch (error) {
+        if (cancelled) return;
+        setSiteBuildNotice(error instanceof Error ? error.message : 'Não foi possível acompanhar o Cursor.');
+        timer = window.setTimeout(() => void pollCursor(), 10_000);
+      }
+    }
+
+    timer = window.setTimeout(() => void pollCursor(), 3_500);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [cursorJob]);
+
   function resetResults(message?: string) {
     setCopied(false);
     setGeneratedBrief('');
     setActiveAiProvider('local');
     setGeneratedSiteHtml('');
+    setGeneratedSiteProvider('');
     setSiteUsage(null);
-    setCursorAgentUrl('');
+    setCursorJob(null);
+    setCursorStatus('');
+    setCursorResult('');
+    setCursorPrUrl('');
     setLeads([]);
     setLeadPage(1);
     setSelectedLead(null);
@@ -382,46 +442,41 @@ export default function Home() {
     window.setTimeout(() => setCopiedPhone(false), 1800);
   }
 
-  async function buildSite(provider: 'kimi' | 'cursor') {
+  async function buildSite(provider: 'internal' | 'cursor') {
     if (!selectedLead || !generatedBrief) {
       setNotice('Selecione um negócio e gere o prompt antes de criar o site.');
       return;
     }
 
     setBuildingSite(provider);
-    setSiteBuildNotice(provider === 'kimi' ? 'A Kimi está criando o HTML do site...' : 'Iniciando um agente seguro do Cursor...');
+    setSiteBuildNotice(provider === 'internal' ? 'A IA está criando o site dentro do Lead Studio...' : 'Iniciando o Cursor e preparando o acompanhamento interno...');
     try {
       const response = await fetch('/api/build-site', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: provider, prompt: generatedBrief }),
+        body: JSON.stringify({ action: provider === 'internal' ? 'build' : 'cursor', provider: 'auto', prompt: generatedBrief }),
       });
       const data = await response.json() as BuildSiteApiResponse;
       if (!response.ok) throw new Error(data.error || 'Não foi possível criar o site.');
 
-      if (provider === 'kimi' && data.html) {
+      if (provider === 'internal' && data.html) {
         setGeneratedSiteHtml(data.html);
+        setGeneratedSiteProvider(data.provider === 'kimi' ? 'Kimi' : 'OpenAI');
         setSiteUsage(data.usage?.total ?? null);
         window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
       }
-      if (provider === 'cursor' && data.agentUrl) setCursorAgentUrl(data.agentUrl);
+      if (provider === 'cursor' && data.agentId && data.runId && data.trackingToken) {
+        setCursorJob({ agentId: data.agentId, runId: data.runId, trackingToken: data.trackingToken });
+        setCursorStatus(data.status || 'CREATING');
+        setCursorResult('');
+        setCursorPrUrl('');
+      }
       setSiteBuildNotice(data.notice || 'Criação iniciada.');
     } catch (error) {
       setSiteBuildNotice(error instanceof Error ? error.message : 'Não foi possível criar o site.');
     } finally {
       setBuildingSite(null);
     }
-  }
-
-  function buildWithLovable() {
-    if (!selectedLead || !generatedBrief) {
-      setNotice('Selecione um negócio e gere o prompt antes de abrir o Lovable.');
-      return;
-    }
-    const concisePrompt = generatedBrief.slice(0, 12_000);
-    const lovableUrl = `https://lovable.dev/?autosubmit=true#prompt=${encodeURIComponent(concisePrompt)}`;
-    window.open(lovableUrl, '_blank', 'noopener,noreferrer');
-    setSiteBuildNotice('Lovable aberto com o prompt preenchido. Entre na sua conta para iniciar a construção.');
   }
 
   function downloadGeneratedSite() {
@@ -639,47 +694,41 @@ export default function Home() {
 
           <section className="builder-panel" id="site-gerado">
             <div className="builder-heading">
-              <div className="panel-heading"><span>05</span><div><b>Crie o site de verdade</b><small>Escolha o destino do prompt e acompanhe o resultado</small></div></div>
+              <div className="panel-heading"><span>05</span><div><b>Construtor integrado</b><small>O site é criado e exibido aqui, sem encaminhamento</small></div></div>
               {siteUsage !== null && <div className="usage-chip">{siteUsage.toLocaleString('pt-BR')} tokens nesta geração</div>}
             </div>
 
             <div className="builder-options">
               <article className="builder-option recommended">
-                <span className="builder-badge">MAIS DIRETO</span>
-                <div className="builder-logo">K</div>
-                <h3>Kimi · prévia aqui</h3>
-                <p>Gera um HTML completo e mostra o site dentro do Lead Studio. Usa Kimi K2.6 sem raciocínio longo e com limite de saída.</p>
-                <button type="button" onClick={() => void buildSite('kimi')} disabled={Boolean(buildingSite) || !generatedBrief}>
-                  {buildingSite === 'kimi' ? 'Criando site...' : 'Criar site com Kimi'}
+                <span className="builder-badge">RECOMENDADO</span>
+                <div className="builder-logo">IA</div>
+                <h3>Criar site aqui</h3>
+                <p>Usa Kimi quando estiver configurada e OpenAI como opção interna. Gera, isola, mostra e permite baixar o HTML sem abrir outra plataforma.</p>
+                <button type="button" onClick={() => void buildSite('internal')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
+                  {buildingSite === 'internal' ? 'Criando dentro do Lead Studio...' : 'Criar e visualizar agora'}
                 </button>
               </article>
 
               <article className="builder-option">
-                <span className="builder-badge">OFICIAL</span>
-                <div className="builder-logo lovable">L</div>
-                <h3>Lovable · construir</h3>
-                <p>Abre o fluxo oficial do Lovable com o prompt já preenchido. O login e a geração acontecem na sua conta Lovable.</p>
-                <button type="button" onClick={buildWithLovable} disabled={!generatedBrief}>Abrir e construir no Lovable ↗</button>
-              </article>
-
-              <article className="builder-option">
-                <span className="builder-badge">REPOSITÓRIO</span>
+                <span className="builder-badge">AGENTE INTEGRADO</span>
                 <div className="builder-logo cursor">C</div>
-                <h3>Cursor · branch e PR</h3>
-                <p>Cria um agente em nuvem, trabalha em uma branch separada e abre um pull request para você revisar.</p>
-                <button type="button" onClick={() => void buildSite('cursor')} disabled={Boolean(buildingSite) || !generatedBrief}>
-                  {buildingSite === 'cursor' ? 'Iniciando agente...' : 'Enviar para o Cursor'}
+                <h3>Construir com Cursor</h3>
+                <p>Cria a branch e o pull request, acompanha o processamento automaticamente e carrega a prévia no Lead Studio quando o arquivo fica pronto.</p>
+                <button type="button" onClick={() => void buildSite('cursor')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
+                  {buildingSite === 'cursor' ? 'Iniciando Cursor...' : cursorJob ? 'Cursor trabalhando...' : 'Construir e acompanhar aqui'}
                 </button>
               </article>
             </div>
 
             <div className="builder-notice" role="status">{siteBuildNotice}</div>
-            {cursorAgentUrl && <a className="cursor-agent-link" href={cursorAgentUrl} target="_blank" rel="noreferrer">Acompanhar agente no Cursor ↗</a>}
+            {cursorStatus && <div className="cursor-progress"><span className={cursorJob ? 'working' : 'done'} /> Cursor: {cursorStatus}</div>}
+            {cursorResult && <p className="cursor-result">{cursorResult}</p>}
+            {cursorPrUrl && <a className="cursor-agent-link" href={cursorPrUrl} target="_blank" rel="noreferrer">Revisar pull request opcional ↗</a>}
 
             {generatedSiteHtml && (
               <div className="site-preview-shell">
                 <div className="site-preview-top">
-                  <span><i /> Prévia isolada do site</span>
+                  <span><i /> Prévia criada aqui {generatedSiteProvider ? `· ${generatedSiteProvider}` : ''}</span>
                   <button type="button" onClick={downloadGeneratedSite}>Baixar HTML</button>
                 </div>
                 <iframe

@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractSafeHtml } from '../app/api/build-site/route.ts';
+import { NextRequest } from 'next/server.js';
+
+import { POST, buildCompactSitePrompt, extractSafeHtml } from '../app/api/build-site/route.ts';
 
 test('extractSafeHtml keeps a complete page and injects an isolated content policy', () => {
   const html = extractSafeHtml(`\`\`\`html
@@ -23,4 +25,35 @@ test('extractSafeHtml removes external executable embeds', () => {
 
 test('extractSafeHtml rejects responses that are not complete pages', () => {
   assert.equal(extractSafeHtml('<section>Somente um fragmento</section>'), '');
+});
+
+test('buildCompactSitePrompt requires verified data and a complete standalone page', () => {
+  const prompt = buildCompactSitePrompt('NEGÓCIO: exemplo verificado');
+
+  assert.match(prompt, /<!doctype html>/i);
+  assert.match(prompt, /Não invente telefone/i);
+  assert.match(prompt, /não use bibliotecas/i);
+  assert.match(prompt, /NEGÓCIO: exemplo verificado/);
+});
+
+test('POST keeps the internal builder closed when no private provider key exists', async () => {
+  const previousOpenAI = process.env.OPENAI_API_KEY;
+  const previousKimi = process.env.MOONSHOT_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.MOONSHOT_API_KEY;
+  try {
+    const request = new NextRequest('http://localhost:3000/api/build-site', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost:3000', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'build', provider: 'auto', prompt: 'Brief verificado. '.repeat(40) }),
+    });
+    const response = await POST(request);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'provider_not_configured');
+  } finally {
+    if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAI;
+    if (previousKimi === undefined) delete process.env.MOONSHOT_API_KEY;
+    else process.env.MOONSHOT_API_KEY = previousKimi;
+  }
 });
