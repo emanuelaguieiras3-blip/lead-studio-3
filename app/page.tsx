@@ -56,6 +56,8 @@ type BuildSiteApiResponse = {
 };
 
 type CursorJob = { agentId: string; runId: string; trackingToken: string };
+type BuilderAiProvider = 'auto' | 'claude' | 'gpt';
+type PuterCodingModel = 'claude-sonnet-4-6' | 'gpt-5.6-luna';
 
 type PuterClient = {
   ai: {
@@ -117,13 +119,13 @@ function buildPuterCodingPrompt(brief: string): string {
   return `Você é um engenheiro frontend sênior especializado em landing pages de alta conversão. Gere somente um documento HTML5 completo começando por <!doctype html>. Inclua CSS e JavaScript no próprio arquivo, sem bibliotecas, fontes, iframes ou scripts externos. Use português do Brasil, layout mobile first, acessível e responsivo. Não invente telefone, endereço, avaliações, serviços, preços, equipe ou depoimentos. Omita dados ausentes ou marque [VALIDAR COM O NEGÓCIO]. Não faça requisições de rede nem simule envio de formulários. Respeite prefers-reduced-motion e contraste WCAG AA.\n\nESPECIFICAÇÃO VERIFICADA:\n${brief}`;
 }
 
-async function createSiteWithPuter(brief: string): Promise<BuildSiteApiResponse> {
+async function createSiteWithPuter(brief: string, model: PuterCodingModel): Promise<BuildSiteApiResponse> {
   const client = await loadPuterClient();
   const result = await client.ai.chat([
     { role: 'system', content: 'Você é um excelente engenheiro frontend. Responda somente com o HTML completo solicitado.' },
     { role: 'user', content: buildPuterCodingPrompt(brief) },
   ], {
-    model: 'claude-sonnet-4-6',
+    model,
     max_tokens: 16_000,
     temperature: 0.2,
   });
@@ -133,7 +135,7 @@ async function createSiteWithPuter(brief: string): Promise<BuildSiteApiResponse>
   const response = await fetch('/api/build-site', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'sanitize', rawContent }),
+    body: JSON.stringify({ action: 'sanitize', model, rawContent }),
   });
   const data = await response.json() as BuildSiteApiResponse;
   if (!response.ok || !data.html) throw new Error(data.error || 'O código gerado não passou pela validação de segurança.');
@@ -321,6 +323,7 @@ export default function Home() {
   const [buildingSite, setBuildingSite] = useState<'internal' | 'cursor' | null>(null);
   const [generatedSiteHtml, setGeneratedSiteHtml] = useState('');
   const [generatedSiteProvider, setGeneratedSiteProvider] = useState('');
+  const [builderAiProvider, setBuilderAiProvider] = useState<BuilderAiProvider>('claude');
   const [siteBuildNotice, setSiteBuildNotice] = useState('Gere um prompt e construa o site sem sair do Lead Studio.');
   const [siteUsage, setSiteUsage] = useState<number | null>(null);
   const [cursorJob, setCursorJob] = useState<CursorJob | null>(null);
@@ -542,23 +545,36 @@ export default function Home() {
     setBuildingSite(provider);
     setSiteBuildNotice(provider === 'internal' ? 'A IA está criando o site dentro do Lead Studio...' : 'Iniciando o Cursor e preparando o acompanhamento interno...');
     try {
-      const response = await fetch('/api/build-site', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: provider === 'internal' ? 'build' : 'cursor', provider: 'auto', prompt: generatedBrief }),
-      });
-      const serverData = await response.json() as BuildSiteApiResponse;
-      let data = serverData;
-      if (provider === 'internal' && (!response.ok || !serverData.html)) {
-        setSiteBuildNotice('Conectando ao Claude Sonnet para gerar o código do site...');
-        data = await createSiteWithPuter(generatedBrief);
-      } else if (!response.ok) {
-        throw new Error(serverData.error || 'Não foi possível criar o site.');
+      let data: BuildSiteApiResponse;
+      if (provider === 'internal' && builderAiProvider !== 'auto') {
+        const model: PuterCodingModel = builderAiProvider === 'gpt' ? 'gpt-5.6-luna' : 'claude-sonnet-4-6';
+        setSiteBuildNotice(`Conectando ao ${builderAiProvider === 'gpt' ? 'GPT-5.6 Luna' : 'Claude Sonnet 4.6'}...`);
+        data = await createSiteWithPuter(generatedBrief, model);
+      } else {
+        const response = await fetch('/api/build-site', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: provider === 'internal' ? 'build' : 'cursor', provider: 'auto', prompt: generatedBrief }),
+        });
+        const serverData = await response.json() as BuildSiteApiResponse;
+        data = serverData;
+        if (provider === 'internal' && (!response.ok || !serverData.html)) {
+          setSiteBuildNotice('Provedor privado indisponível. Conectando ao Claude Sonnet 4.6...');
+          data = await createSiteWithPuter(generatedBrief, 'claude-sonnet-4-6');
+        } else if (!response.ok) {
+          throw new Error(serverData.error || 'Não foi possível criar o site.');
+        }
       }
 
       if (provider === 'internal' && data.html) {
         setGeneratedSiteHtml(data.html);
-        setGeneratedSiteProvider(data.provider === 'kimi' ? 'Kimi' : data.provider === 'puter' ? 'Claude Sonnet 4.6' : 'OpenAI');
+        setGeneratedSiteProvider(data.provider === 'kimi'
+          ? 'Kimi'
+          : data.model === 'gpt-5.6-luna'
+            ? 'GPT-5.6 Luna'
+            : data.provider === 'puter'
+              ? 'Claude Sonnet 4.6'
+              : 'OpenAI');
         setSiteUsage(data.usage?.total ?? null);
         window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
       }
@@ -795,6 +811,34 @@ export default function Home() {
             <div className="builder-heading">
               <div className="panel-heading"><span>05</span><div><b>Construtor integrado</b><small>O site é criado e exibido aqui, sem encaminhamento</small></div></div>
               <div className="usage-chip">{siteUsage !== null ? `${siteUsage.toLocaleString('pt-BR')} tokens nesta geração` : 'ATÉ 24.000 TOKENS POR SITE'}</div>
+            </div>
+
+            <div className="provider-control" style={{ marginBottom: 18 }}>
+              <small>PROVEDOR DE IA PARA PROGRAMAR O SITE</small>
+              <div className="profession-strip" role="group" aria-label="Provedor de IA do construtor">
+                {([
+                  ['claude', 'C', 'Claude Sonnet 4.6'],
+                  ['gpt', 'O', 'GPT-5.6 Luna'],
+                  ['auto', '✦', 'Automático'],
+                ] as const).map(([value, icon, label]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    className={builderAiProvider === value ? 'profession active' : 'profession'}
+                    onClick={() => setBuilderAiProvider(value)}
+                    disabled={Boolean(buildingSite)}
+                  >
+                    <span>{icon}</span>{label}
+                  </button>
+                ))}
+              </div>
+              <div className="provider-recommendation">
+                {builderAiProvider === 'claude'
+                  ? 'Recomendado para código e design. Pode solicitar login da Puter no primeiro uso.'
+                  : builderAiProvider === 'gpt'
+                    ? 'Alternativa rápida para gerar HTML completo. Pode solicitar login da Puter no primeiro uso.'
+                    : 'Tenta Kimi/OpenAI privados e usa Claude automaticamente se estiverem indisponíveis.'}
+              </div>
             </div>
 
             <div className="builder-options">

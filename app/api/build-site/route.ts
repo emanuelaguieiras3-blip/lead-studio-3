@@ -394,11 +394,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const rawContent = cleanText(body?.rawContent, MAX_HTML_LENGTH);
       const html = extractSafeHtml(rawContent);
       if (!html) return secureJson({ error: 'A IA não entregou um HTML completo e seguro. Tente gerar novamente.' }, 422);
+      const requestedModel = cleanText(body?.model, 40);
+      const model = ['claude-sonnet-4-6', 'gpt-5.6-luna'].includes(requestedModel)
+        ? requestedModel
+        : 'claude-sonnet-4-6';
       return secureJson({
         provider: 'puter',
-        model: 'claude-sonnet-4-6',
+        model,
         html,
-        notice: 'Site criado com Claude Sonnet e validado dentro do Lead Studio.',
+        notice: `Site criado com ${model === 'gpt-5.6-luna' ? 'GPT-5.6 Luna' : 'Claude Sonnet'} e validado dentro do Lead Studio.`,
       });
     }
     if (action === 'cursor_status') return cursorStatus(body ?? {});
