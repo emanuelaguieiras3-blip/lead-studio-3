@@ -56,6 +56,13 @@ test('filterLeadCandidates keeps operational Google Maps businesses with public 
   assert.match(leads[0].verificationLabel, /Google Maps/);
 });
 
+test('buildSearchQueries localizes Portuguese searches without spending a query on Brazil', () => {
+  const queries = buildSearchQueries('Todos os comércios', 'Lisboa', 'Lisboa', 'PT');
+
+  assert.ok(queries.some((query) => query.includes('comércios e serviços') && query.includes('Portugal')));
+  assert.ok(queries.every((query) => !query.includes('Brasil')));
+});
+
 test('filterLeadCandidates rejects invalid phones and listings without a Google Maps URL', () => {
   const results = [
     {
@@ -87,6 +94,12 @@ test('normalizePublicPhone accepts Brazilian public numbers and removes invalid 
   assert.equal(normalizePublicPhone('+55 11 98888-7777'), '+55 (11) 98888-7777');
   assert.equal(normalizePublicPhone('11 3333-2222'), '(11) 3333-2222');
   assert.equal(normalizePublicPhone('12345'), '');
+});
+
+test('normalizePublicPhone accepts Portuguese public numbers', () => {
+  assert.equal(normalizePublicPhone('+351 912 345 678', 'PT'), '+351 912 345 678');
+  assert.equal(normalizePublicPhone('213 456 789', 'PT'), '213 456 789');
+  assert.equal(normalizePublicPhone('12345', 'PT'), '');
 });
 
 test('lead search falls back to real OpenStreetMap records without a shared anonymous click limit', async () => {

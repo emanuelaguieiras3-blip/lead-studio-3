@@ -64,13 +64,21 @@ export type PublicLead = {
   mapsUrl: string;
   source: 'google' | 'openstreetmap';
   verificationLabel: string;
+  socialProfiles: { instagram: string; facebook: string };
+};
+
+export type CountryCode = 'BR' | 'PT';
+
+const COUNTRY_CONFIG: Record<CountryCode, { name: string; languageCode: string; nominatimCode: string }> = {
+  BR: { name: 'Brasil', languageCode: 'pt-BR', nominatimCode: 'br' },
+  PT: { name: 'Portugal', languageCode: 'pt-PT', nominatimCode: 'pt' },
 };
 
 const ALLOWED_PROFESSIONS = new Set([
   'Barbearia', 'Imobiliária', 'Clínica de estética', 'Odontologia', 'Advocacia', 'Restaurante',
   'Academia', 'Pet shop', 'Salão de beleza', 'Contabilidade', 'Oficina mecânica', 'Fotografia',
   'Psicologia', 'Consultoria', 'Lavanderia', 'Design de interiores', 'Seguros', 'Hotel',
-  'Auto Center', 'Agência de marketing',
+  'Auto Center', 'Agência de marketing', 'Todos os comércios',
 ]);
 const MAX_BODY_BYTES = 2_048;
 const MAX_GOOGLE_PAGES = 3;
@@ -79,12 +87,13 @@ let rotationCursor = 0;
 
 class GoogleCredentialError extends Error {}
 
-export function buildSearchQueries(profession: string, city: string, state: string): string[] {
-  const normalizedProfession = profession.trim();
+export function buildSearchQueries(profession: string, city: string, state: string, country: CountryCode = 'BR'): string[] {
+  const normalizedProfession = profession.trim() === 'Todos os comércios' ? 'comércios e serviços' : profession.trim();
   const normalizedCity = city.trim();
   const normalizedState = state.trim();
+  const countryName = COUNTRY_CONFIG[country].name;
   const queries = [
-    `${normalizedProfession} em ${normalizedCity}, ${normalizedState}, Brasil`,
+    `${normalizedProfession} em ${normalizedCity}, ${normalizedState}, ${countryName}`,
     `${normalizedProfession} em ${normalizedCity} ${normalizedState}`,
     `${normalizedProfession} ${normalizedCity} ${normalizedState}`,
     `${normalizedProfession} perto de ${normalizedCity} ${normalizedState}`,
@@ -96,12 +105,19 @@ export function buildSearchQueries(profession: string, city: string, state: stri
   return [...new Set(queries)];
 }
 
-export function normalizePublicPhone(value: string | undefined): string {
+export function normalizePublicPhone(value: string | undefined, country: CountryCode = 'BR'): string {
   if (!value) return '';
 
   const firstPhone = value.split(/[;/]/)[0]?.trim() ?? '';
   const hasInternationalPrefix = firstPhone.startsWith('+');
   const digits = firstPhone.replace(/\D/g, '');
+  if (country === 'PT') {
+    const portugueseDigits = digits.startsWith('351') && digits.length === 12 ? digits.slice(3) : digits;
+    if (!/^[2-9]\d{8}$/.test(portugueseDigits)) return '';
+    const countryPrefix = hasInternationalPrefix || digits.startsWith('351') ? '+351 ' : '';
+    return `${countryPrefix}${portugueseDigits.slice(0, 3)} ${portugueseDigits.slice(3, 6)} ${portugueseDigits.slice(6)}`;
+  }
+
   const brazilianDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
 
   if (!/^\d{10,11}$/.test(brazilianDigits)) return '';
@@ -115,14 +131,14 @@ export function normalizePublicPhone(value: string | undefined): string {
   return `${countryPrefix}(${areaCode}) ${formattedLocal}`;
 }
 
-export function filterLeadCandidates(results: GooglePlace[], minReviews: number): PublicLead[] {
+export function filterLeadCandidates(results: GooglePlace[], minReviews: number, country: CountryCode = 'BR'): PublicLead[] {
   const floor = Math.max(20, Math.min(500, Math.round(minReviews)));
 
   return [...results]
     .filter((place) => place.id)
     .filter((place) => place.businessStatus === 'OPERATIONAL')
     .filter((place) => !place.websiteUri?.trim())
-    .filter((place) => Boolean(normalizePublicPhone(place.nationalPhoneNumber)))
+    .filter((place) => Boolean(normalizePublicPhone(place.nationalPhoneNumber, country)))
     .filter((place) => Boolean(place.googleMapsUri?.startsWith('https://')))
     .filter((place) => (place.userRatingCount ?? 0) >= floor)
     .map((place) => ({
@@ -131,11 +147,12 @@ export function filterLeadCandidates(results: GooglePlace[], minReviews: number)
       rating: typeof place.rating === 'number' ? place.rating : null,
       reviewCount: typeof place.userRatingCount === 'number' ? place.userRatingCount : null,
       address: place.formattedAddress?.trim() ?? '',
-      phone: normalizePublicPhone(place.nationalPhoneNumber),
+      phone: normalizePublicPhone(place.nationalPhoneNumber, country),
       website: null,
       mapsUrl: place.googleMapsUri ?? '',
       source: 'google' as const,
       verificationLabel: 'Cadastro operacional verificado no Google Maps',
+      socialProfiles: { instagram: '', facebook: '' },
     }))
     .filter((lead) => lead.name !== 'Empresa sem nome')
     .sort((left, right) => (right.reviewCount ?? 0) - (left.reviewCount ?? 0) || (right.rating ?? 0) - (left.rating ?? 0));
@@ -162,6 +179,7 @@ const OSM_FILTERS: Record<string, string[]> = {
   'Hotel': ['["tourism"="hotel"]'],
   'Auto Center': ['["shop"="car_repair"]', '["shop"="tyres"]'],
   'Agência de marketing': ['["office"="advertising_agency"]'],
+  'Todos os comércios': ['["shop"]', '["office"]', '["amenity"~"restaurant|cafe|bar|pharmacy|clinic|dentist|bank"]'],
 };
 
 const OSM_HEADERS = {
@@ -169,8 +187,8 @@ const OSM_HEADERS = {
   'Accept-Language': 'pt-BR,pt;q=0.9',
 };
 
-function osmPhone(tags: Record<string, string>): string {
-  return normalizePublicPhone(tags.phone || tags['contact:phone'] || tags.mobile || tags['contact:mobile']);
+function osmPhone(tags: Record<string, string>, country: CountryCode): string {
+  return normalizePublicPhone(tags.phone || tags['contact:phone'] || tags.mobile || tags['contact:mobile'], country);
 }
 
 function osmAddress(tags: Record<string, string>, city: string, state: string): string {
@@ -179,19 +197,41 @@ function osmAddress(tags: Record<string, string>, city: string, state: string): 
   return [street, district, tags['addr:city'] || city, state].filter(Boolean).join(' · ');
 }
 
+function osmSocialProfile(tags: Record<string, string>, platform: 'instagram' | 'facebook'): string {
+  const raw = (tags[`contact:${platform}`] || tags[platform] || '').trim();
+  if (!raw) return '';
+  const host = platform === 'instagram' ? 'www.instagram.com' : 'www.facebook.com';
+  const candidate = /^https:\/\//i.test(raw)
+    ? raw
+    : `https://${host}/${raw.replace(/^@/, '').replace(/^\/+|\/+$/g, '')}`;
+  try {
+    const url = new URL(candidate);
+    const allowedHosts = platform === 'instagram'
+      ? new Set(['instagram.com', 'www.instagram.com'])
+      : new Set(['facebook.com', 'www.facebook.com', 'm.facebook.com']);
+    if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname.toLowerCase())) return '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 async function fetchNominatimBusinesses(
   profession: string,
   city: string,
   state: string,
   location: NominatimResult,
+  country: CountryCode,
 ): Promise<PublicLead[]> {
   const terms: Record<string, string> = {
     'Clínica de estética': 'estética', 'Salão de beleza': 'salão de beleza', 'Oficina mecânica': 'oficina mecânica',
     'Design de interiores': 'design de interiores', 'Agência de marketing': 'agência de marketing', 'Auto Center': 'auto center',
   };
   const params: Record<string, string> = {
-    q: `${terms[profession] || profession}, ${city}, ${state}, Brasil`,
-    format: 'jsonv2', countrycodes: 'br', addressdetails: '1', extratags: '1', namedetails: '1', limit: '50',
+    q: `${terms[profession] || profession}, ${city}, ${state}, ${COUNTRY_CONFIG[country].name}`,
+    format: 'jsonv2', countrycodes: COUNTRY_CONFIG[country].nominatimCode, addressdetails: '1', extratags: '1', namedetails: '1', limit: '50',
   };
   if (location.boundingbox) {
     const [south, north, west, east] = location.boundingbox;
@@ -216,17 +256,21 @@ async function fetchNominatimBusinesses(
       rating: null,
       reviewCount: null,
       address: item.display_name || `${city} · ${state}`,
-      phone: normalizePublicPhone(item.extratags?.phone || item.extratags?.['contact:phone']),
+      phone: normalizePublicPhone(item.extratags?.phone || item.extratags?.['contact:phone'], country),
       website: null,
       mapsUrl: `https://www.openstreetmap.org/${item.osm_type}/${item.osm_id}`,
       source: 'openstreetmap' as const,
       verificationLabel: 'Cadastro público verificado no OpenStreetMap',
+      socialProfiles: {
+        instagram: osmSocialProfile(item.extratags ?? {}, 'instagram'),
+        facebook: osmSocialProfile(item.extratags ?? {}, 'facebook'),
+      },
     }));
 }
 
-async function fetchOpenStreetMap(profession: string, city: string, state: string): Promise<PublicLead[]> {
+async function fetchOpenStreetMap(profession: string, city: string, state: string, country: CountryCode): Promise<PublicLead[]> {
   const locationResponse = await fetch(`https://nominatim.openstreetmap.org/search?${new URLSearchParams({
-    q: `${city}, ${state}, Brasil`, format: 'jsonv2', countrycodes: 'br', limit: '1',
+    q: `${city}, ${state}, ${COUNTRY_CONFIG[country].name}`, format: 'jsonv2', countrycodes: COUNTRY_CONFIG[country].nominatimCode, limit: '1',
   })}`, {
     headers: OSM_HEADERS,
     signal: AbortSignal.timeout(12_000),
@@ -235,7 +279,7 @@ async function fetchOpenStreetMap(profession: string, city: string, state: strin
   const [location] = await locationResponse.json() as NominatimResult[];
   if (!location?.lat || !location.lon) return [];
 
-  const radius = ['São Paulo', 'Rio de Janeiro', 'Brasília', 'Salvador', 'Fortaleza', 'Belo Horizonte'].includes(city)
+  const radius = ['São Paulo', 'Rio de Janeiro', 'Brasília', 'Salvador', 'Fortaleza', 'Belo Horizonte', 'Lisboa', 'Porto'].includes(city)
     ? 15_000
     : 10_000;
   const searchArea = `around:${radius},${location.lat},${location.lon}`;
@@ -261,7 +305,7 @@ async function fetchOpenStreetMap(profession: string, city: string, state: strin
     }
   }
 
-  if (!elements.length) return fetchNominatimBusinesses(profession, city, state, location);
+  if (!elements.length) return fetchNominatimBusinesses(profession, city, state, location, country);
 
   const leads = elements
     .filter((element) => element.tags?.name)
@@ -278,11 +322,15 @@ async function fetchOpenStreetMap(profession: string, city: string, state: strin
         rating: null,
         reviewCount: null,
         address: osmAddress(tags, city, state),
-        phone: osmPhone(tags),
+        phone: osmPhone(tags, country),
         website: null,
         mapsUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
         source: 'openstreetmap',
         verificationLabel: 'Cadastro público verificado no OpenStreetMap',
+        socialProfiles: {
+          instagram: osmSocialProfile(tags, 'instagram'),
+          facebook: osmSocialProfile(tags, 'facebook'),
+        },
       };
     });
 
@@ -336,15 +384,15 @@ function isTrustedOrigin(request: NextRequest): boolean {
   return allowed.has(origin);
 }
 
-async function fetchPlacesWithKey(apiKey: string, query: string): Promise<GooglePlace[]> {
+async function fetchPlacesWithKey(apiKey: string, query: string, country: CountryCode): Promise<GooglePlace[]> {
   const places: GooglePlace[] = [];
   let pageToken = '';
 
   for (let page = 0; page < MAX_GOOGLE_PAGES; page += 1) {
     const body: Record<string, unknown> = {
       textQuery: query,
-      languageCode: 'pt-BR',
-      regionCode: 'BR',
+      languageCode: COUNTRY_CONFIG[country].languageCode,
+      regionCode: country,
       pageSize: 20,
     };
     if (pageToken) body.pageToken = pageToken;
@@ -380,15 +428,16 @@ async function fetchPlaces(
   city: string,
   state: string,
   minReviews: number,
+  country: CountryCode,
 ): Promise<GooglePlace[]> {
   const unique = new Map<string, GooglePlace>();
 
-  for (const query of buildSearchQueries(profession, city, state)) {
+  for (const query of buildSearchQueries(profession, city, state, country)) {
     const start = rotationCursor % apiKeys.length;
     for (let attempt = 0; attempt < apiKeys.length; attempt += 1) {
       const index = (start + attempt) % apiKeys.length;
       try {
-        const places = await fetchPlacesWithKey(apiKeys[index], query);
+        const places = await fetchPlacesWithKey(apiKeys[index], query, country);
         rotationCursor = (index + 1) % apiKeys.length;
         for (const place of places) {
           if (place.id) unique.set(place.id, place);
@@ -399,7 +448,7 @@ async function fetchPlaces(
       }
     }
 
-    if (filterLeadCandidates([...unique.values()], minReviews).length >= MAX_LEADS) break;
+    if (filterLeadCandidates([...unique.values()], minReviews, country).length >= MAX_LEADS) break;
   }
 
   return [...unique.values()];
@@ -416,17 +465,18 @@ export async function POST(request: NextRequest) {
     const profession = cleanText(body?.profession);
     const city = cleanText(body?.city);
     const state = cleanText(body?.state, 60);
+    const country = (cleanText(body?.country, 2).toUpperCase() || 'BR') as CountryCode;
     const minReviews = Math.max(20, Math.min(500, Number(body?.minReviews) || 30));
 
-    if (!ALLOWED_PROFESSIONS.has(profession) || !/^[\p{L} .'-]{2,120}$/u.test(city) || !/^[\p{L} .'-]{2,60}$/u.test(state)) {
+    if (!COUNTRY_CONFIG[country] || !ALLOWED_PROFESSIONS.has(profession) || !/^[\p{L} .'-]{2,120}$/u.test(city) || !/^[\p{L} .'-]{2,60}$/u.test(state)) {
       return secureJson({ error: 'Os filtros informados não são válidos.' }, 400);
     }
 
     const apiKeys = getGoogleKeys();
     if (apiKeys.length) {
       try {
-        const results = await fetchPlaces(apiKeys, profession, city, state, minReviews);
-        const googleLeads = filterLeadCandidates(results, minReviews)
+        const results = await fetchPlaces(apiKeys, profession, city, state, minReviews, country);
+        const googleLeads = filterLeadCandidates(results, minReviews, country)
           .slice(0, MAX_LEADS)
           .map((lead) => ({ ...lead, address: lead.address || `${city}, ${state}` }));
         if (googleLeads.length) {
@@ -441,7 +491,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const streetLeads = await fetchOpenStreetMap(profession, city, state);
+    const streetLeads = await fetchOpenStreetMap(profession, city, state, country);
     return secureJson({
       leads: streetLeads,
       mode: 'openstreetmap',

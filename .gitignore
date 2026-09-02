@@ -38,5 +38,10 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+tsconfig.tsbuildinfo
+.antigravity/
+.cursor/
+.gemini/
+.openai/
 
 .vercel

@@ -1,10 +1,12 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useStudio } from '../components/studio-provider';
+import { StudioOverview } from '../components/ui/StudioOverview';
 
-type StateOption = { id: number; sigla: string; nome: string };
-type CityOption = { id: number; nome: string };
+type CountryCode = 'BR' | 'PT';
+type StateOption = { id: number | string; sigla: string; nome: string };
+type CityOption = { id: number | string; nome: string };
 type Profession = { id: string; label: string; icon: string; style: string; services: string };
 type Lead = {
   id: string;
@@ -17,6 +19,17 @@ type Lead = {
   mapsUrl: string;
   source: 'google' | 'openstreetmap';
   verificationLabel: string;
+  socialProfiles?: { instagram: string; facebook: string };
+};
+
+type SocialMaterials = { instagramUrl: string; facebookUrl: string; notes: string; profileContext: string };
+type SocialProfileInsight = {
+  platform: 'instagram' | 'facebook';
+  url: string;
+  title: string;
+  description: string;
+  imageUrl: string;
+  status: 'public' | 'restricted';
 };
 
 type SearchApiResponse = {
@@ -32,16 +45,22 @@ type GenerateApiResponse = {
   prompt?: string;
   proposal?: string;
   suggestions?: string | null;
+  valueProposition?: string;
   notice?: string;
   mode?: string;
-  provider?: 'openai' | 'claude' | 'gemini' | null;
+  provider?: 'gemini' | 'openai' | null;
+  thinkingLevel?: 'medium';
+  webResearch?: boolean;
+  discoveredSocialProfiles?: { instagramUrl: string; facebookUrl: string };
   error?: string;
 };
 
 type BuildSiteApiResponse = {
-  provider?: 'kimi' | 'openai' | 'cursor' | 'puter';
+  provider?: 'gemini' | 'openai';
+  mode?: 'local-fallback';
   code?: string;
   model?: string;
+  thinkingLevel?: 'medium';
   html?: string;
   usage?: { input: number | null; output: number | null; total: number | null; cached: number | null };
   agentId?: string;
@@ -55,93 +74,28 @@ type BuildSiteApiResponse = {
   error?: string;
 };
 
-type CursorJob = { agentId: string; runId: string; trackingToken: string };
-type BuilderAiProvider = 'auto' | 'claude';
-type PuterCodingModel = 'claude-sonnet-4-6';
-
-type PuterClient = {
-  ai: {
-    chat: (messages: Array<{ role: 'system' | 'user'; content: string }>, options: {
-      model: string;
-      max_tokens: number;
-      temperature: number;
-    }) => Promise<unknown>;
-  };
+type GeminiModel = 'gemini-3.6-flash' | 'gemini-3.7-flash';
+type OpenAIModel = 'gpt-5.4';
+type AiModel = GeminiModel | OpenAIModel;
+type AiProvider = 'gemini' | 'openai';
+type ProviderStatus = {
+  gemini: { configured: boolean; model: GeminiModel };
+  openai: { configured: boolean; model: OpenAIModel; reasoningEffort: 'medium' };
 };
 
-let puterLoader: Promise<PuterClient> | null = null;
-
-function getPuterClient(): PuterClient | undefined {
-  return (window as typeof window & { puter?: PuterClient }).puter;
+function providerForModel(model: AiModel): AiProvider {
+  return model === 'gpt-5.4' ? 'openai' : 'gemini';
 }
 
-function loadPuterClient(): Promise<PuterClient> {
-  const activeClient = getPuterClient();
-  if (activeClient) return Promise.resolve(activeClient);
-  if (puterLoader) return puterLoader;
-
-  puterLoader = new Promise<PuterClient>((resolve, reject) => {
-    const existingScript = document.querySelector<HTMLScriptElement>('script[data-lead-studio-puter]');
-    const script = existingScript || document.createElement('script');
-    const handleLoad = () => {
-      const client = getPuterClient();
-      if (client) resolve(client);
-      else reject(new Error('A integração de IA não carregou corretamente.'));
-    };
-    script.addEventListener('load', handleLoad, { once: true });
-    script.addEventListener('error', () => reject(new Error('Não foi possível carregar a IA de programação.')), { once: true });
-    if (!existingScript) {
-      script.src = 'https://js.puter.com/v2/';
-      script.async = true;
-      script.dataset.leadStudioPuter = 'true';
-      document.head.appendChild(script);
-    }
-  });
-  return puterLoader;
+function modelLabel(model: AiModel): string {
+  if (model === 'gpt-5.4') return 'GPT-5.4';
+  return model === 'gemini-3.7-flash' ? 'Gemini 3.7 Flash' : 'Gemini 3.6 Flash';
 }
 
-function extractPuterText(result: unknown): string {
-  if (typeof result === 'string') return result;
-  if (!result || typeof result !== 'object') return '';
-  const response = result as { text?: unknown; message?: { content?: unknown } };
-  if (typeof response.text === 'string') return response.text;
-  const content = response.message?.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.map((item) => {
-    if (typeof item === 'string') return item;
-    if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') return item.text;
-    return '';
-  }).join('\n').trim();
+function reasoningLabel(model: AiModel): string {
+  void model;
+  return 'raciocínio médio';
 }
-
-function buildPuterCodingPrompt(brief: string): string {
-  return `Crie uma landing page compacta em no máximo 900 tokens. Retorne somente HTML5 completo, começando por <!doctype html>, com CSS interno e sem recursos externos. Priorize: hero, três benefícios, dados reais de contato/localização e CTA. Use português do Brasil, mobile first, contraste acessível e pouco JavaScript. Não invente fatos; omita dados ausentes. O HTML precisa terminar corretamente mesmo que seja simples.\n\nDADOS E DIREÇÃO:\n${brief.slice(0, 6_000)}`;
-}
-
-async function createSiteWithPuter(brief: string, model: PuterCodingModel): Promise<BuildSiteApiResponse> {
-  const client = await loadPuterClient();
-  const result = await client.ai.chat([
-    { role: 'system', content: 'Você é um excelente engenheiro frontend. Responda somente com o HTML completo solicitado.' },
-    { role: 'user', content: buildPuterCodingPrompt(brief) },
-  ], {
-    model,
-    max_tokens: 950,
-    temperature: 0.2,
-  });
-  const rawContent = extractPuterText(result);
-  if (!rawContent) throw new Error('Claude não retornou o código do site. Tente novamente.');
-
-  const response = await fetch('/api/build-site', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'sanitize', model, rawContent }),
-  });
-  const data = await response.json() as BuildSiteApiResponse;
-  if (!response.ok || !data.html) throw new Error(data.error || 'O código gerado não passou pela validação de segurança.');
-  return data;
-}
-
 const states: StateOption[] = [
   { id: 12, sigla: 'AC', nome: 'Acre' }, { id: 27, sigla: 'AL', nome: 'Alagoas' },
   { id: 16, sigla: 'AP', nome: 'Amapá' }, { id: 13, sigla: 'AM', nome: 'Amazonas' },
@@ -159,7 +113,19 @@ const states: StateOption[] = [
   { id: 17, sigla: 'TO', nome: 'Tocantins' },
 ];
 
+const portugalRegions: StateOption[] = [
+  'Aveiro', 'Beja', 'Braga', 'Bragança', 'Castelo Branco', 'Coimbra', 'Évora', 'Faro', 'Guarda', 'Leiria',
+  'Lisboa', 'Portalegre', 'Porto', 'Santarém', 'Setúbal', 'Viana do Castelo', 'Vila Real', 'Viseu',
+  'Região Autónoma dos Açores', 'Região Autónoma da Madeira',
+].map((nome) => ({ id: nome, sigla: nome, nome }));
+
+const countries: Array<{ id: CountryCode; nome: string }> = [
+  { id: 'BR', nome: 'Brasil' },
+  { id: 'PT', nome: 'Portugal' },
+];
+
 const professions: Profession[] = [
+  { id: 'todos', label: 'Todos os comércios', icon: '⌁', style: 'identidade local, clara e adaptada ao negócio encontrado', services: 'presença digital, informações essenciais, localização e contato' },
   { id: 'barbearia', label: 'Barbearia', icon: '✂', style: 'masculino sofisticado, editorial, grafite, creme e cobre', services: 'cortes, barba, tratamentos e agendamento' },
   { id: 'imobiliaria', label: 'Imobiliária', icon: '⌂', style: 'arquitetônico premium, muito espaço em branco, azul profundo e areia', services: 'imóveis em destaque, venda, locação e avaliação' },
   { id: 'estetica', label: 'Clínica de estética', icon: '✦', style: 'elegante, acolhedor, tons naturais e fotografia luminosa', services: 'procedimentos, benefícios, equipe e avaliação' },
@@ -185,8 +151,14 @@ const professions: Profession[] = [
 const creativeDirections = [
   { id: 'cinematic', name: 'Cinematográfica', kind: 'Storytelling imersivo', color: '#4d8bff', reason: 'Grandes momentos visuais, ritmo narrativo e interações com intenção.' },
   { id: 'editorial', name: 'Editorial', kind: 'Tipografia e composição', color: '#b088ff', reason: 'Uma presença sofisticada, autoral e guiada por conteúdo.' },
-  { id: 'conversion', name: 'Conversão', kind: 'Clareza e persuasão', color: '#5ecf8f', reason: 'Gatilhos éticos, objeções bem tratadas e contato sem fricção.' },
+  { id: 'conversion', name: 'Conversão', kind: 'Clareza e utilidade', color: '#5ecf8f', reason: 'Informação objetiva, dúvidas bem tratadas e contato sem fricção.' },
   { id: 'local', name: 'Presença local', kind: 'Proximidade e confiança', color: '#d39a72', reason: 'Localização, relevância regional e dados públicos no centro da copy.' },
+];
+
+const aiModels: Array<{ id: AiModel; provider: AiProvider; icon: string; label: string; detail: string }> = [
+  { id: 'gemini-3.6-flash', provider: 'gemini', icon: '3.6', label: 'Gemini 3.6 Flash', detail: 'Equilíbrio · raciocínio médio' },
+  { id: 'gemini-3.7-flash', provider: 'gemini', icon: '3.7', label: 'Gemini 3.7 Flash', detail: 'Pesquisa avançada · raciocínio médio' },
+  { id: 'gpt-5.4', provider: 'openai', icon: '5.4', label: 'GPT-5.4', detail: 'OpenAI · raciocínio médio' },
 ];
 
 const LEADS_PER_PAGE = 8;
@@ -258,7 +230,7 @@ Visual ${profession.style}. O site deve parecer um produto premium de marca, nã
 
 ESTRUTURA DA LANDING PAGE
 1. Hero cinematográfico: frase principal forte, proposta de valor premium, localização clara e CTA refinado como “Falar com a equipe” ou “Solicitar atendimento”.
-2. Seção de reputação e prova social local com avaliação real, comentários relevantes e contexto de confiança.
+2. Seção de reputação local com avaliação agregada real e contexto da fonte consultada.
 3. Seção de ${profession.services} em layout premium, editorial e fácil de consumir.
 4. Diferenciais e benefícios em visão de marca: clareza, estratégia, experiência e valor percebido.
 5. Processo em 3 passos simples, humanizados e pensados para reduzir objeções.
@@ -300,7 +272,12 @@ Formato de saída recomendado:
 }
 
 export default function Home() {
+  const { setStudio } = useStudio();
+  const totalSteps = 5;
+  const stepLabels = ['Busca', 'Oportunidade', 'Direção e IA', 'Prompt e proposta', 'Construção'];
+  const [currentStep, setCurrentStep] = useState(1);
   const [professionId, setProfessionId] = useState('barbearia');
+  const [country, setCountry] = useState<CountryCode>('BR');
   const [stateId, setStateId] = useState('35');
   const [cities, setCities] = useState<CityOption[]>([]);
   const [city, setCity] = useState('São Paulo');
@@ -318,21 +295,38 @@ export default function Home() {
   const [activeDirection, setActiveDirection] = useState('cinematic');
   const [variation, setVariation] = useState(0);
   const [generatedBrief, setGeneratedBrief] = useState('');
-  const [buildingSite, setBuildingSite] = useState<'internal' | 'cursor' | null>(null);
+  const [generatedProposal, setGeneratedProposal] = useState('');
+  const [copiedProposal, setCopiedProposal] = useState(false);
+  const [instagramUrl, setInstagramUrl] = useState('');
+  const [facebookUrl, setFacebookUrl] = useState('');
+  const [socialNotes, setSocialNotes] = useState('');
+  const [socialInsights, setSocialInsights] = useState<SocialProfileInsight[]>([]);
+  const [analyzingSocial, setAnalyzingSocial] = useState(false);
+  const [useSocialPhotos, setUseSocialPhotos] = useState(false);
+  const [buildingSite, setBuildingSite] = useState<'internal' | null>(null);
   const [generatedSiteHtml, setGeneratedSiteHtml] = useState('');
   const [generatedSiteProvider, setGeneratedSiteProvider] = useState('');
-  const [builderAiProvider, setBuilderAiProvider] = useState<BuilderAiProvider>('claude');
+  const [builderAiModel, setBuilderAiModel] = useState<AiModel>('gemini-3.6-flash');
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus>({
+    gemini: { configured: false, model: 'gemini-3.6-flash' },
+    openai: { configured: false, model: 'gpt-5.4', reasoningEffort: 'medium' },
+  });
+  const [strategicAnalysis, setStrategicAnalysis] = useState('');
   const [siteBuildNotice, setSiteBuildNotice] = useState('Gere um prompt e construa o site sem sair do Lead Studio.');
   const [siteUsage, setSiteUsage] = useState<number | null>(null);
-  const [cursorJob, setCursorJob] = useState<CursorJob | null>(null);
-  const [cursorStatus, setCursorStatus] = useState('');
-  const [cursorResult, setCursorResult] = useState('');
-  const [cursorPrUrl, setCursorPrUrl] = useState('');
   const generationRequest = useRef(0);
+  const lastGenerationKey = useRef('');
 
-  const state = useMemo(() => states.find((item) => String(item.id) === stateId) ?? states[24], [stateId]);
+  const regionOptions = country === 'PT' ? portugalRegions : states;
+  const state = useMemo(
+    () => regionOptions.find((item) => String(item.id) === stateId) ?? regionOptions[0],
+    [regionOptions, stateId],
+  );
+  const countryName = country === 'PT' ? 'Portugal' : 'Brasil';
+  const activeProvider = providerForModel(builderAiModel);
+  const activeProviderConfigured = providerStatus[activeProvider].configured;
   const profession = useMemo(() => professions.find((item) => item.id === professionId) ?? professions[0], [professionId]);
-  const activePrompt = generatedBrief || 'Selecione uma oportunidade real para gerar um prompt exclusivo com gatilhos mentais.';
+  const activePrompt = generatedBrief || 'Selecione uma oportunidade real para gerar um prompt estratégico baseado em evidências.';
   const totalLeadPages = Math.max(1, Math.ceil(leads.length / LEADS_PER_PAGE));
   const currentLeadPage = Math.min(leadPage, totalLeadPages);
   const paginatedLeads = useMemo(
@@ -341,79 +335,138 @@ export default function Home() {
   );
   const firstVisibleLead = leads.length ? (currentLeadPage - 1) * LEADS_PER_PAGE + 1 : 0;
   const lastVisibleLead = Math.min(currentLeadPage * LEADS_PER_PAGE, leads.length);
+  const socialProfileContext = useMemo(
+    () => socialInsights
+      .filter((profile) => profile.status === 'public')
+      .map((profile) => `${profile.platform}: ${profile.title || 'sem título'} — ${profile.description || 'sem descrição pública'}`)
+      .join('\n'),
+    [socialInsights],
+  );
+  const progressPercentage = (currentStep / totalSteps) * 100;
+
+  useEffect(() => {
+    setStudio({
+      currentStep,
+      totalSteps,
+      leadsCount: leads.length,
+      selectedName: selectedLead?.name ?? null,
+      city,
+      segment: profession.label,
+      sourceMode: mode,
+    });
+  }, [city, currentStep, leads.length, mode, profession.label, selectedLead?.name, setStudio, totalSteps]);
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${stateId}/municipios?orderBy=nome`, { signal: controller.signal })
-      .then((response) => response.json() as Promise<CityOption[]>)
+    const source = country === 'PT'
+      ? `/api/locations?region=${encodeURIComponent(stateId)}`
+      : `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${stateId}/municipios?orderBy=nome`;
+    fetch(source, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('locations_unavailable');
+        if (country === 'PT') {
+          const data = await response.json() as { municipalities?: string[] };
+          return (data.municipalities ?? []).map((nome) => ({ id: nome, nome }));
+        }
+        return response.json() as Promise<CityOption[]>;
+      })
       .then((data) => {
         setCities(data);
         setCity((current) => data.some((item) => item.nome === current) ? current : (data[0]?.nome ?? ''));
       })
-      .catch((error) => { if (error instanceof Error && error.name !== 'AbortError') setCities([]); })
+      .catch((error) => {
+        if (error instanceof Error && error.name !== 'AbortError') {
+          setCities([]);
+          setCity('');
+          setNotice(country === 'PT' ? 'Não foi possível carregar os municípios portugueses. Tente novamente.' : 'Não foi possível carregar as cidades agora.');
+        }
+      })
       .finally(() => setLoadingCities(false));
     return () => controller.abort();
-  }, [stateId]);
+  }, [country, stateId]);
 
   useEffect(() => {
-    if (!cursorJob) return undefined;
-    let cancelled = false;
-    let timer: number | undefined;
+    const controller = new AbortController();
+    fetch('/api/providers', { signal: controller.signal })
+      .then((response) => response.json() as Promise<{ providers?: ProviderStatus }>)
+      .then((data) => { if (data.providers) setProviderStatus(data.providers); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
-    async function pollCursor(): Promise<void> {
-      try {
-        const response = await fetch('/api/build-site', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'cursor_status', ...cursorJob }),
-        });
-        const data = await response.json() as BuildSiteApiResponse;
-        if (!response.ok) throw new Error(data.error || 'Não foi possível acompanhar o Cursor.');
-        if (cancelled) return;
-
-        setCursorStatus(data.status || 'RUNNING');
-        setSiteBuildNotice(data.notice || 'Cursor trabalhando dentro do Lead Studio.');
-        if (data.result) setCursorResult(data.result);
-        if (data.prUrl) setCursorPrUrl(data.prUrl);
-        if (data.html) {
-          setGeneratedSiteHtml(data.html);
-          setGeneratedSiteProvider('Cursor');
-          window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
+  useEffect(() => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
         }
-        if (data.done) {
-          setCursorJob(null);
-          return;
-        }
-        timer = window.setTimeout(() => void pollCursor(), 5_000);
-      } catch (error) {
-        if (cancelled) return;
-        setSiteBuildNotice(error instanceof Error ? error.message : 'Não foi possível acompanhar o Cursor.');
-        timer = window.setTimeout(() => void pollCursor(), 10_000);
-      }
-    }
-
-    timer = window.setTimeout(() => void pollCursor(), 3_500);
-    return () => {
-      cancelled = true;
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [cursorJob]);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px' });
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, []);
 
   function resetResults(message?: string) {
+    lastGenerationKey.current = '';
     setCopied(false);
     setGeneratedBrief('');
+    setGeneratedProposal('');
+    setStrategicAnalysis('');
+    setInstagramUrl('');
+    setFacebookUrl('');
+    setSocialNotes('');
+    setSocialInsights([]);
+    setUseSocialPhotos(false);
     setGeneratedSiteHtml('');
     setGeneratedSiteProvider('');
     setSiteUsage(null);
-    setCursorJob(null);
-    setCursorStatus('');
-    setCursorResult('');
-    setCursorPrUrl('');
     setLeads([]);
     setLeadPage(1);
     setSelectedLead(null);
     setVariation(0);
     if (message) setNotice(message);
+  }
+
+  function scrollToWizard(): void {
+    window.requestAnimationFrame(() => {
+      document.getElementById('wizard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  async function nextStep(): Promise<void> {
+    if (currentStep === 1 && (!professionId || !stateId || !city || !minReviews)) {
+      setNotice(`Preencha os campos obrigatórios de segmento, ${country === 'PT' ? 'distrito ou região' : 'estado'}, cidade e avaliações.`);
+      return;
+    }
+    if (currentStep === 1 && leads.length === 0) {
+      setNotice('Faça a busca e encontre ao menos uma oportunidade antes de avançar.');
+      return;
+    }
+    if (currentStep === 2 && !selectedLead) {
+      setNotice('Selecione uma oportunidade real antes de avançar.');
+      return;
+    }
+    if (currentStep === 3 && !activeProviderConfigured) {
+      setNotice('Selecione uma IA configurada antes de avançar.');
+      return;
+    }
+    if (currentStep === 3 && selectedLead) {
+      const prompt = await generateIntegratedPrompt(activeDirection, selectedLead, variation, undefined, builderAiModel);
+      if (!prompt) return;
+    }
+    if (currentStep === 4 && (!generatedBrief.trim() || !generatedProposal.trim())) {
+      setNotice('Gere e revise o prompt e a proposta antes de avançar para a construção.');
+      return;
+    }
+    setCurrentStep((step) => Math.min(totalSteps, step + 1));
+    scrollToWizard();
+  }
+
+  function prevStep(): void {
+    setCurrentStep((step) => Math.max(1, step - 1));
+    scrollToWizard();
   }
 
   async function searchLeads() {
@@ -425,7 +478,7 @@ export default function Home() {
       const response = await fetch('/api/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profession: profession.label, city, state: state.nome, minReviews: Number(minReviews) }),
+        body: JSON.stringify({ profession: profession.label, city, state: state.nome, country, minReviews: Number(minReviews) }),
       });
       const data = (await response.json()) as SearchApiResponse;
       if (!response.ok) {
@@ -436,6 +489,13 @@ export default function Home() {
       setLeadPage(1);
       setSelectedLead(null);
       setGeneratedBrief('');
+      setGeneratedProposal('');
+      setStrategicAnalysis('');
+      setInstagramUrl('');
+      setFacebookUrl('');
+      setSocialNotes('');
+      setSocialInsights([]);
+      setUseSocialPhotos(false);
       setMode(data.mode ?? 'idle');
       setNotice(data.notice || 'Busca concluída.');
     } catch (error) {
@@ -452,11 +512,23 @@ export default function Home() {
     direction = activeDirection,
     leadOverride?: Lead,
     variationOverride = variation,
+    socialOverride?: SocialMaterials,
+    modelOverride?: AiModel,
   ) {
     const lead = leadOverride ?? selectedLead;
     if (!lead) {
       setNotice('Selecione uma oportunidade real para gerar o texto.');
       return '';
+    }
+    const socialMaterials = socialOverride ?? { instagramUrl, facebookUrl, notes: socialNotes, profileContext: socialProfileContext };
+    const activeModel = modelOverride ?? builderAiModel;
+    const generationKey = JSON.stringify({
+      country, region: state.nome, city, segment: profession.label, leadId: lead.id, direction,
+      variation: variationOverride, model: activeModel, socialMaterials,
+    });
+    if (lastGenerationKey.current === generationKey && generatedBrief.trim()) {
+      setNotice('Prompt já atualizado: nenhuma informação mudou e nenhum token adicional foi usado.');
+      return generatedBrief;
     }
     const requestId = generationRequest.current + 1;
     generationRequest.current = requestId;
@@ -469,23 +541,49 @@ export default function Home() {
         body: JSON.stringify({
           segment: profession.label,
           city,
-          state: state.sigla,
+          state: country === 'PT' ? state.nome : state.sigla,
+          country,
           lead,
           direction,
-          provider: 'local',
+          provider: providerForModel(activeModel),
+          model: activeModel,
           variation: variationOverride,
+          socialMaterials,
         }),
       });
       const data = (await response.json()) as GenerateApiResponse & { proposal?: string };
       if (!response.ok || !data.prompt) throw new Error(data.error || 'Não foi possível gerar o prompt.');
       if (generationRequest.current !== requestId) return '';
       const nextPrompt = data.prompt;
+      lastGenerationKey.current = generationKey;
       setGeneratedBrief(nextPrompt);
+      setGeneratedProposal(data.proposal || '');
+      setStrategicAnalysis(data.valueProposition || data.suggestions?.slice(0, 2_400) || data.proposal || '');
+      const discovered = data.discoveredSocialProfiles;
+      const discoveredInstagram = instagramUrl || discovered?.instagramUrl || '';
+      const discoveredFacebook = facebookUrl || discovered?.facebookUrl || '';
+      if ((discoveredInstagram || discoveredFacebook) && (!instagramUrl || !facebookUrl)) {
+        setInstagramUrl(discoveredInstagram);
+        setFacebookUrl(discoveredFacebook);
+        try {
+          const socialResponse = await fetch('/api/social-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instagramUrl: discoveredInstagram, facebookUrl: discoveredFacebook }),
+          });
+          const socialData = await socialResponse.json() as { profiles?: SocialProfileInsight[] };
+          if (socialResponse.ok) setSocialInsights(socialData.profiles ?? []);
+        } catch {
+          // A pesquisa principal continua válida mesmo se a rede social bloquear os metadados.
+        }
+      }
       setNotice(data.notice || `Texto exclusivo criado para ${lead.name}.`);
       return nextPrompt;
     } catch (error) {
       if (generationRequest.current === requestId) {
         setGeneratedBrief('');
+        setGeneratedProposal('');
+        setStrategicAnalysis('');
         setNotice(error instanceof Error ? error.message : 'Não foi possível gerar o brief.');
       }
       return '';
@@ -494,11 +592,25 @@ export default function Home() {
     }
   }
 
-  async function selectOpportunity(lead: Lead) {
+  function selectOpportunity(lead: Lead) {
+    const nextSocialMaterials = {
+      instagramUrl: lead.socialProfiles?.instagram ?? '',
+      facebookUrl: lead.socialProfiles?.facebook ?? '',
+      notes: '',
+      profileContext: '',
+    };
     setSelectedLead(lead);
+    lastGenerationKey.current = '';
     setGeneratedBrief('');
+    setGeneratedProposal('');
+    setStrategicAnalysis('');
+    setInstagramUrl(nextSocialMaterials.instagramUrl);
+    setFacebookUrl(nextSocialMaterials.facebookUrl);
+    setSocialNotes('');
+    setSocialInsights([]);
+    setUseSocialPhotos(false);
     setVariation(0);
-    await generateIntegratedPrompt(activeDirection, lead, 0);
+    setNotice(`${lead.name} selecionado. Confirme a direção e os materiais sociais; a IA escolhida será chamada uma única vez ao avançar.`);
   }
 
   function goToLeadPage(page: number) {
@@ -523,6 +635,41 @@ export default function Home() {
     window.setTimeout(() => setCopied(false), 1800);
   }
 
+  async function copyProposal() {
+    if (!generatedProposal) return;
+    await navigator.clipboard.writeText(generatedProposal);
+    setCopiedProposal(true);
+    setNotice('Proposta copiada e pronta para revisão antes do envio.');
+    window.setTimeout(() => setCopiedProposal(false), 1800);
+  }
+
+  async function analyzeSocialProfiles() {
+    if (!instagramUrl && !facebookUrl) {
+      setNotice('Informe ao menos um perfil social para analisar.');
+      return;
+    }
+    setAnalyzingSocial(true);
+    setNotice('Lendo somente as informações públicas dos perfis...');
+    try {
+      const response = await fetch('/api/social-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instagramUrl, facebookUrl }),
+      });
+      const data = await response.json() as { profiles?: SocialProfileInsight[]; notice?: string; error?: string };
+      if (!response.ok) throw new Error(data.error || 'Não foi possível analisar os perfis.');
+      const nextInsights = data.profiles ?? [];
+      setSocialInsights(nextInsights);
+      lastGenerationKey.current = '';
+      setNotice(data.notice || 'Perfis analisados. A IA escolhida usará as publicações e materiais ao avançar, sem uma chamada extra agora.');
+    } catch (error) {
+      setSocialInsights([]);
+      setNotice(error instanceof Error ? error.message : 'Não foi possível analisar os perfis.');
+    } finally {
+      setAnalyzingSocial(false);
+    }
+  }
+
   async function copyPhone() {
     if (!selectedLead?.phone) return;
     await navigator.clipboard.writeText(selectedLead.phone);
@@ -530,51 +677,47 @@ export default function Home() {
     window.setTimeout(() => setCopiedPhone(false), 1800);
   }
 
-  async function buildSite(provider: 'internal' | 'cursor') {
+  async function buildSite() {
     if (!selectedLead || !generatedBrief) {
       setNotice('Selecione um negócio e gere o prompt antes de criar o site.');
       return;
     }
 
-    setBuildingSite(provider);
-    setSiteBuildNotice(provider === 'internal' ? 'A IA está criando o site dentro do Lead Studio...' : 'Iniciando o Cursor e preparando o acompanhamento interno...');
+    setBuildingSite('internal');
+    setSiteBuildNotice(`${modelLabel(builderAiModel)} está criando o site dentro do Lead Studio...`);
     try {
       let data: BuildSiteApiResponse;
-      if (provider === 'internal' && builderAiProvider !== 'auto') {
-        const model: PuterCodingModel = 'claude-sonnet-4-6';
-        setSiteBuildNotice('Conectando ao Claude Sonnet 4.6 em modo rápido...');
-        data = await createSiteWithPuter(generatedBrief, model);
-      } else {
+      {
         const response = await fetch('/api/build-site', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: provider === 'internal' ? 'build' : 'cursor', provider: 'auto', prompt: generatedBrief }),
+          body: JSON.stringify({
+            action: 'build',
+            provider: providerForModel(builderAiModel),
+            model: builderAiModel,
+            country,
+            prompt: generatedBrief,
+            approvedImageUrls: useSocialPhotos
+              ? socialInsights.filter((profile) => profile.status === 'public' && profile.imageUrl).map((profile) => profile.imageUrl)
+              : [],
+          }),
         });
         const serverData = await response.json() as BuildSiteApiResponse;
         data = serverData;
-        if (provider === 'internal' && (!response.ok || !serverData.html)) {
-          setSiteBuildNotice('Provedor privado indisponível. Conectando ao Claude Sonnet 4.6...');
-          data = await createSiteWithPuter(generatedBrief, 'claude-sonnet-4-6');
-        } else if (!response.ok) {
+        if (!response.ok) {
           throw new Error(serverData.error || 'Não foi possível criar o site.');
         }
       }
 
-      if (provider === 'internal' && data.html) {
+      if (data.html) {
         setGeneratedSiteHtml(data.html);
-        setGeneratedSiteProvider(data.provider === 'kimi'
-          ? 'Kimi'
-          : data.provider === 'puter'
-              ? 'Claude Sonnet 4.6'
-              : 'OpenAI');
+        setGeneratedSiteProvider(data.mode === 'local-fallback'
+          ? 'Modo seguro local'
+          : data.model === 'gpt-5.4'
+            ? 'GPT-5.4 · raciocínio médio'
+            : data.model ? data.model.replace('gemini-', 'Gemini ').replace('-flash', ' Flash') : 'Gemini');
         setSiteUsage(data.usage?.total ?? null);
         window.requestAnimationFrame(() => document.getElementById('site-gerado')?.scrollIntoView({ behavior: 'smooth' }));
-      }
-      if (provider === 'cursor' && data.agentId && data.runId && data.trackingToken) {
-        setCursorJob({ agentId: data.agentId, runId: data.runId, trackingToken: data.trackingToken });
-        setCursorStatus(data.status || 'CREATING');
-        setCursorResult('');
-        setCursorPrUrl('');
       }
       setSiteBuildNotice(data.notice || 'Criação iniciada.');
     } catch (error) {
@@ -596,43 +739,44 @@ export default function Home() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="rail">
-        <div className="brand-mark" aria-label="Lead Studio">L</div>
-        <nav className="rail-nav" aria-label="Navegação principal">
-          <Link href="/" className="rail-button active" aria-label="Dashboard">⌁</Link>
-          <Link href="#oportunidades" className="rail-button" aria-label="Oportunidades">◎</Link>
-          <Link href="#brief" className="rail-button" aria-label="Briefs">✦</Link>
-          <Link href="#direcao" className="rail-button" aria-label="Direção criativa">□</Link>
-        </nav>
-        <div className="rail-status" title="Sistema online"><i /></div>
-      </aside>
+    <main className="workspace">
+        <StudioOverview
+          leadsCount={leads.length}
+          selectedName={selectedLead?.name ?? null}
+          currentStep={currentStep}
+          totalSteps={totalSteps}
+          city={city ? `${city} · ${country === 'PT' ? state.nome : state.sigla} · ${countryName}` : ''}
+          segment={profession.label}
+          sourceMode={mode}
+        />
 
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <div className="eyebrow"><span className="live-dot" /> RADAR DE OPORTUNIDADES</div>
-            <h1>Lead Studio <span>/ negócios sem site</span></h1>
+        <section className="wizard-shell" id="wizard" aria-label="Assistente de criação em cinco etapas" data-reveal>
+          <div className="wizard-progress-copy">
+            <div><span>FLUXO GUIADO</span><b>{stepLabels[currentStep - 1]}</b></div>
+            <strong>Etapa {currentStep} de {totalSteps}</strong>
           </div>
-          <div className="header-metric"><b>{leads.length}</b><span>leads filtrados</span></div>
-        </header>
-
-        <section className="intro">
-          <div>
-            <span className="kicker">PROSPECÇÃO + CRIAÇÃO</span>
-            <h2>Encontre o negócio certo.<br /><em>Crie o site perfeito.</em></h2>
+          <div
+            className="wizard-progress-track"
+            role="progressbar"
+            aria-label="Progresso da criação"
+            aria-valuemin={1}
+            aria-valuemax={totalSteps}
+            aria-valuenow={currentStep}
+          >
+            <span style={{ width: `${progressPercentage}%` }} />
           </div>
-          <p>Selecione uma profissão e uma cidade. O radar consulta cadastros públicos reais, filtra quem não informa site e prepara o prompt para a melhor IA.</p>
+          <ol className="wizard-step-list">
+            {stepLabels.map((label, index) => {
+              const step = index + 1;
+              const status = step === currentStep ? 'active' : step < currentStep ? 'completed' : '';
+              return <li key={label} className={status}><span>{step < currentStep ? '✓' : step}</span><b>{label}</b></li>;
+            })}
+          </ol>
+          <p className="wizard-feedback" role="status">{notice}</p>
         </section>
 
-        <div className="insight-bar" aria-label="Resumo do fluxo">
-          <div className="insight-pill"><span className="dot-success" /> Lead ativo: {selectedLead ? selectedLead.name : 'Nenhum selecionado'}</div>
-          <div className="insight-pill"><span className="dot-neutral" /> Mercado: {profession.label}</div>
-          <div className="insight-pill"><span className="dot-warning" /> Local: {city} / {state.sigla}</div>
-        </div>
-
         <div className="dashboard-grid">
-          <section className="filters-panel">
+          <section className={`filters-panel form-step ${currentStep === 1 ? 'active' : ''}`} aria-hidden={currentStep !== 1}>
             <div className="panel-heading"><span>01</span><div><b>Defina a oportunidade</b><small>Profissão, região e reputação mínima</small></div></div>
 
             <label className="field-label">TIPO DE NEGÓCIO</label>
@@ -651,18 +795,30 @@ export default function Home() {
               ))}
             </div>
 
-            <div className="location-fields">
-              <label>Estado
-                <select value={stateId} onChange={(event) => {
+            <div className="location-fields location-fields-three">
+              <label>País
+                <select required value={country} onChange={(event) => {
+                  const nextCountry = event.target.value as CountryCode;
+                  setCountry(nextCountry);
+                  setStateId(nextCountry === 'PT' ? 'Lisboa' : '35');
+                  setCity(nextCountry === 'PT' ? 'Lisboa' : 'São Paulo');
                   setLoadingCities(true);
-                  setStateId(event.target.value);
-                  resetResults('Estado alterado. Escolha a cidade e faça uma nova busca.');
+                  resetResults(`País alterado para ${nextCountry === 'PT' ? 'Portugal' : 'Brasil'}. Escolha a região e faça uma nova busca.`);
                 }}>
-                  {states.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
+                  {countries.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
                 </select>
               </label>
-              <label>Cidade
-                <select value={city} onChange={(event) => {
+              <label>{country === 'PT' ? 'Distrito ou região' : 'Estado'}
+                <select required value={stateId} onChange={(event) => {
+                  setLoadingCities(true);
+                  setStateId(event.target.value);
+                  resetResults(`${country === 'PT' ? 'Distrito ou região' : 'Estado'} alterado. Escolha a cidade e faça uma nova busca.`);
+                }}>
+                  {regionOptions.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}
+                </select>
+              </label>
+              <label>{country === 'PT' ? 'Município' : 'Cidade'}
+                <select required value={city} onChange={(event) => {
                   setCity(event.target.value);
                   resetResults('Cidade alterada. Faça uma nova busca para ver negócios reais.');
                 }} disabled={loadingCities}>
@@ -673,19 +829,19 @@ export default function Home() {
             </div>
 
             <label className="review-field">Mínimo de avaliações
-              <select value={minReviews} onChange={(event) => setMinReviews(event.target.value)}>
+              <select required value={minReviews} onChange={(event) => setMinReviews(event.target.value)}>
                 <option value="20">20+ avaliações</option><option value="30">30+ avaliações</option>
                 <option value="50">50+ avaliações</option><option value="100">100+ avaliações</option>
                 <option value="250">250+ avaliações</option><option value="500">500+ avaliações</option>
               </select>
             </label>
 
-            <div className="locked-filter"><span>✓</span><div><b>Cadastros reais sem site informado</b><small>Telefone exibido quando disponível · OpenStreetMap</small></div><i>ATIVO</i></div>
+            <div className="locked-filter"><span>✓</span><div><b>Cadastros reais sem site informado</b><small>{country === 'PT' ? 'Cobertura dos 308 municípios · Google Maps + OpenStreetMap' : 'Telefone exibido quando disponível · Google Maps + OpenStreetMap'}</small></div><i>ATIVO</i></div>
             <button className="search-button" onClick={searchLeads} disabled={searching || loadingCities}>{searching ? 'Pesquisando...' : 'Encontrar oportunidades'} <span>↗</span></button>
             <p className={`data-note ${mode === 'blocked' ? 'blocked' : ''}`}>{(mode === 'google' || mode === 'openstreetmap') && <b>DADOS REAIS · </b>}{notice}</p>
           </section>
 
-          <section className="leads-panel" id="oportunidades">
+          <section className={`leads-panel form-step ${currentStep === 2 ? 'active' : ''}`} id="oportunidades" aria-hidden={currentStep !== 2}>
             <div className="panel-heading leads-heading"><span>02</span><div><b>Oportunidades reais</b><small>Cadastros sem site informado na fonte consultada</small></div><div className="sort-chip">DADOS PÚBLICOS</div></div>
             <div className="lead-list">
               {!leads.length && !searching && (
@@ -724,31 +880,79 @@ export default function Home() {
               </nav>
             )}
             {selectedLead && (
-              <div className="contact-bar">
-                <span><small>{selectedLead.verificationLabel || 'CADASTRO PÚBLICO VERIFICADO'}</small><b>{selectedLead.phone || 'Telefone não informado'}</b></span>
-                {selectedLead.phone && <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>}
-                {selectedLead.phone && <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>}
-                <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">{selectedLead.source === 'google' ? 'Google Maps' : 'OpenStreetMap'} ↗</a>
-                <a className="instagram-link" href={socialSearchUrl('instagram', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Instagram ↗</a>
-                <a className="facebook-link" href={socialSearchUrl('facebook', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Facebook ↗</a>
-              </div>
+              <>
+                <div className="contact-bar">
+                  <span><small>{selectedLead.verificationLabel || 'CADASTRO PÚBLICO VERIFICADO'}</small><b>{selectedLead.phone || 'Telefone não informado'}</b></span>
+                  {selectedLead.phone && <button onClick={copyPhone}>{copiedPhone ? 'Copiado ✓' : 'Copiar número'}</button>}
+                  {selectedLead.phone && <a href={`tel:${selectedLead.phone.replace(/[^\d+]/g, '')}`}>Ligar</a>}
+                  <a href={selectedLead.mapsUrl} target="_blank" rel="noreferrer">{selectedLead.source === 'google' ? 'Google Maps' : 'OpenStreetMap'} ↗</a>
+                  <a className="instagram-link" href={socialSearchUrl('instagram', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Instagram ↗</a>
+                  <a className="facebook-link" href={socialSearchUrl('facebook', selectedLead, city)} target="_blank" rel="noreferrer">Buscar Facebook ↗</a>
+                </div>
+                <div className="social-materials">
+                  <div className="social-materials-heading"><div><b>Materiais públicos da marca</b><small>Os @ e links confirmados entram diretamente no prompt da IA</small></div><span>REFERÊNCIA</span></div>
+                  <div className="social-grid">
+                    <label>Instagram
+                      <input type="url" value={instagramUrl} onChange={(event) => { setInstagramUrl(event.target.value); setSocialInsights([]); lastGenerationKey.current = ''; }} placeholder="https://www.instagram.com/perfil" />
+                    </label>
+                    <label>Facebook
+                      <input type="url" value={facebookUrl} onChange={(event) => { setFacebookUrl(event.target.value); setSocialInsights([]); lastGenerationKey.current = ''; }} placeholder="https://www.facebook.com/pagina" />
+                    </label>
+                  </div>
+                  {socialInsights.length > 0 && (
+                    <div className="brand-dossier" aria-label="Dossiê público da marca">
+                      {socialInsights.map((profile) => (
+                        <article key={`${profile.platform}-${profile.url}`} className={profile.status === 'public' ? 'available' : 'restricted'}>
+                          <span>{profile.platform === 'instagram' ? 'IG' : 'FB'}</span>
+                          <div><b>{profile.status === 'public' ? (profile.title || 'Perfil público encontrado') : 'Leitura limitada pela rede'}</b><small>{profile.status === 'public' ? (profile.description || 'Perfil validado, sem descrição pública.') : 'Cole a bio e os materiais autorizados abaixo.'}</small></div>
+                          <i>{profile.status === 'public' ? 'LIDO' : 'MANUAL'}</i>
+                        </article>
+                      ))}
+                      {socialInsights.some((profile) => profile.status === 'public' && profile.imageUrl) && (
+                        <>
+                          <div className="social-image-gallery" aria-label="Imagens institucionais públicas encontradas">
+                            {socialInsights.filter((profile) => profile.status === 'public' && profile.imageUrl).map((profile) => (
+                              <article
+                                key={`image-${profile.platform}-${profile.url}`}
+                                role="img"
+                                aria-label={`Imagem institucional pública encontrada no ${profile.platform}`}
+                                style={{ backgroundImage: `linear-gradient(180deg,transparent 45%,rgba(12,12,10,.74)),url(${JSON.stringify(profile.imageUrl).slice(1, -1)})` }}
+                              >
+                                <span>{profile.platform === 'instagram' ? 'Instagram' : 'Facebook'} · imagem pública</span>
+                              </article>
+                            ))}
+                          </div>
+                          <label className="photo-authorization">
+                            <input type="checkbox" checked={useSocialPhotos} onChange={(event) => setUseSocialPhotos(event.target.checked)} />
+                            <span><b>Usar fotos públicas encontradas</b><small>Confirmo que tenho autorização para usar essas imagens no site.</small></span>
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <label className="social-notes">Publicações e materiais autorizados
+                    <textarea value={socialNotes} onChange={(event) => { setSocialNotes(event.target.value); lastGenerationKey.current = ''; }} placeholder="Cole legendas ou publicações recentes e descreva serviços, campanhas, cores e fotos autorizadas. Não inclua dados que você não confirmou." />
+                  </label>
+                  <div className="social-actions"><p>A IA considera publicações acessíveis publicamente. Se a rede exigir login, cole as legendas acima. A geração acontece uma só vez ao avançar.</p><div><button type="button" className="ghost-social-button" onClick={() => void analyzeSocialProfiles()} disabled={analyzingSocial}>{analyzingSocial ? 'Analisando...' : 'Analisar perfis'}</button></div></div>
+                </div>
+              </>
             )}
           </section>
 
-          <section className="ai-panel" id="direcao">
+          <section className={`ai-panel form-step ${currentStep === 3 ? 'active' : ''}`} id="direcao" aria-hidden={currentStep !== 3}>
             <div className="panel-heading"><span>03</span><div><b>Direção criativa</b><small>Cada caminho muda narrativa, copy e interação</small></div></div>
-            <div className="ranking-note">Selecione uma direção para gerar automaticamente um prompt compacto, exclusivo e baseado apenas nos dados reais da oportunidade.</div>
+            <div className="ranking-note">Gemini e GPT‑5.4 pesquisam fontes públicas e perfis compatíveis, acessam URLs informadas e evoluem o prompt com raciocínio médio, sem assumir que homônimos são a mesma empresa.</div>
             <div className="ai-list">
               {creativeDirections.map((direction, index) => (
                 <button
                   key={direction.id}
                   type="button"
                   className={activeDirection === direction.id ? 'ai-row selected' : 'ai-row'}
-                  onClick={async () => {
+                  onClick={() => {
                     setActiveDirection(direction.id);
                     setVariation(0);
-                    if (selectedLead) await generateIntegratedPrompt(direction.id, selectedLead, 0);
-                    else setNotice('Direção escolhida. Agora selecione uma oportunidade real.');
+                    lastGenerationKey.current = '';
+                    setNotice(selectedLead ? `${direction.name} selecionada. A IA escolhida aplicará essa direção ao avançar.` : 'Direção escolhida. Agora selecione uma oportunidade real.');
                   }}
                 >
                   <span className="ai-rank">0{index + 1}</span><span className="ai-logo" style={{ background: direction.color }}>{direction.name.charAt(0)}</span>
@@ -758,9 +962,37 @@ export default function Home() {
               ))}
             </div>
 
+            <div className="provider-control">
+              <small>ESCOLHA A IA</small>
+              <div className="profession-strip" role="group" aria-label="Modelo de IA do construtor">
+                {aiModels.map((model) => (
+                  <button
+                    type="button"
+                    key={model.id}
+                    className={builderAiModel === model.id ? 'profession active provider-choice' : 'profession provider-choice'}
+                    disabled={Boolean(buildingSite) || !providerStatus[model.provider].configured}
+                    onClick={() => {
+                      setBuilderAiModel(model.id);
+                      lastGenerationKey.current = '';
+                      setGeneratedSiteHtml('');
+                      setSiteUsage(null);
+                      setSiteBuildNotice(`${model.label} selecionado com ${reasoningLabel(model.id)}.`);
+                      setNotice(`${model.label} selecionado. A próxima geração usará ${reasoningLabel(model.id)}.`);
+                    }}
+                  >
+                    <span>{model.icon}</span>{model.label}<small>{model.detail} · {providerStatus[model.provider].configured ? 'configurado' : 'sem chave'}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="provider-recommendation">
+                As chaves ficam protegidas somente no servidor. A interface nunca recebe, grava ou exibe os segredos.
+              </div>
+            </div>
+
           </section>
 
-          <section className="prompt-panel" id="brief">
+          <section className={`content-step form-step ${currentStep === 4 ? 'active' : ''}`} id="brief" aria-hidden={currentStep !== 4}>
+          <div className="prompt-panel">
             <div className="prompt-header">
               <div className="panel-heading"><span>04</span><div><b>Prompt premium automático</b><small>{selectedLead ? `Personalizado para ${selectedLead.name}` : 'Será personalizado com o lead selecionado'}</small></div></div>
               <div className="prompt-actions">
@@ -772,66 +1004,48 @@ export default function Home() {
               <div className="prompt-top"><span>prompt-site.md · automático compacto</span><i>{activePrompt.length.toLocaleString('pt-BR')} caracteres</i></div>
               <textarea className="prompt-editor" value={activePrompt} onChange={(event) => setGeneratedBrief(event.target.value)} aria-label="Prompt do site" />
             </div>
-            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Fonte pública rastreável</span><span>Auditoria factual</span><span>Pronto para Codex, Claude e outras IAs</span></div>
+            <div className="prompt-footer"><span>✦ Único para cada oportunidade</span><span>Busca Google + acesso por URL</span><span>{reasoningLabel(builderAiModel)}</span><span>Auditoria factual</span></div>
+          </div>
+
+          <div className="proposal-panel" id="proposta">
+            <div className="prompt-header">
+              <div className="panel-heading"><span>04B</span><div><b>Proposta automática</b><small>{selectedLead ? `Escopo comercial para ${selectedLead.name}` : 'Gerada junto com o prompt'}</small></div></div>
+              <div className="prompt-actions"><button type="button" onClick={copyProposal} disabled={!generatedProposal}>{copiedProposal ? 'Copiada ✓' : 'Copiar proposta'}</button></div>
+            </div>
+            <div className="proposal-summary"><span>Mensagem curta</span><span>Pronta para WhatsApp</span><span>Sem preço inventado</span></div>
+            <textarea className="proposal-editor" value={generatedProposal || 'Selecione uma oportunidade para gerar uma proposta curta e pronta para enviar ao cliente.'} onChange={(event) => setGeneratedProposal(event.target.value)} aria-label="Proposta automática" />
+          </div>
           </section>
 
-          <section className="builder-panel" id="site-gerado">
+          <section className={`builder-panel form-step ${currentStep === 5 ? 'active' : ''}`} id="site-gerado" aria-hidden={currentStep !== 5}>
             <div className="builder-heading">
               <div className="panel-heading"><span>05</span><div><b>Construtor integrado</b><small>O site é criado e exibido aqui, sem encaminhamento</small></div></div>
-              <div className="usage-chip">{siteUsage !== null ? `${siteUsage.toLocaleString('pt-BR')} tokens nesta geração` : 'MODO RÁPIDO · ATÉ 1.000 TOKENS'}</div>
+              <div className="usage-chip">{siteUsage !== null ? `${siteUsage.toLocaleString('pt-BR')} tokens · ${reasoningLabel(builderAiModel)}` : `AI ROUTER · ${reasoningLabel(builderAiModel).toUpperCase()}`}</div>
             </div>
 
-            <div className="provider-control" style={{ marginBottom: 18 }}>
-              <small>PROVEDOR DE IA PARA PROGRAMAR O SITE</small>
-              <div className="profession-strip" role="group" aria-label="Provedor de IA do construtor">
-                {([
-                  ['claude', 'C', 'Claude Sonnet 4.6'],
-                  ['auto', '✦', 'Automático'],
-                ] as const).map(([value, icon, label]) => (
-                  <button
-                    type="button"
-                    key={value}
-                    className={builderAiProvider === value ? 'profession active' : 'profession'}
-                    onClick={() => setBuilderAiProvider(value)}
-                    disabled={Boolean(buildingSite)}
-                  >
-                    <span>{icon}</span>{label}
-                  </button>
-                ))}
-              </div>
-              <div className="provider-recommendation">
-                {builderAiProvider === 'claude'
-                  ? 'Modo rápido: prompt reduzido e HTML completo em até 1.000 tokens. Pode solicitar login da Puter.'
-                  : 'Tenta Kimi/OpenAI privados e usa Claude rápido automaticamente se estiverem indisponíveis.'}
-              </div>
-            </div>
+            <article className={`strategic-analysis ${generatingPrompt ? 'loading' : ''}`} aria-live="polite">
+              <span>ANÁLISE DA IA EM TEMPO REAL</span>
+              <h3>Por que este site pode gerar valor para {selectedLead?.name || 'o estabelecimento'}</h3>
+              {generatingPrompt
+                ? <p>O {modelLabel(builderAiModel)} está cruzando o briefing, a oportunidade e os materiais sociais confirmados...</p>
+                : <p>{strategicAnalysis || 'A análise aparecerá aqui quando o briefing estiver pronto. Ela explicará posicionamento, proposta de valor e como o site ajuda o cliente a avançar.'}</p>}
+              <small>Modelo: {builderAiModel} · {reasoningLabel(builderAiModel)} · dados públicos e materiais autorizados · sem fatos inventados</small>
+            </article>
 
             <div className="builder-options">
               <article className="builder-option recommended">
                 <span className="builder-badge">RECOMENDADO</span>
                 <div className="builder-logo">IA</div>
-                <h3>Claude Sonnet rápido</h3>
-                <p>Gera um site compacto e completo com até 1.000 tokens, reduzindo espera e evitando respostas cortadas. A prévia continua dentro do Lead Studio.</p>
-                <button type="button" onClick={() => void buildSite('internal')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
-                  {buildingSite === 'internal' ? 'Claude está programando...' : 'Criar e visualizar agora'}
+                <h3>Construir com {modelLabel(builderAiModel)}</h3>
+                <p>A IA gera a página completa com {reasoningLabel(builderAiModel)} e mostra a prévia dentro do Lead Studio.</p>
+                <button type="button" onClick={() => void buildSite()} disabled={Boolean(buildingSite) || !generatedBrief || !activeProviderConfigured}>
+                  {buildingSite === 'internal' ? 'A IA está programando...' : 'Criar e visualizar agora'}
                 </button>
               </article>
 
-              <article className="builder-option">
-                <span className="builder-badge">AGENTE INTEGRADO</span>
-                <div className="builder-logo cursor">C</div>
-                <h3>Construir com Cursor</h3>
-                <p>Cria a branch e o pull request, acompanha o processamento automaticamente e carrega a prévia no Lead Studio quando o arquivo fica pronto.</p>
-                <button type="button" onClick={() => void buildSite('cursor')} disabled={Boolean(buildingSite) || Boolean(cursorJob) || !generatedBrief}>
-                  {buildingSite === 'cursor' ? 'Iniciando Cursor...' : cursorJob ? 'Cursor trabalhando...' : 'Construir e acompanhar aqui'}
-                </button>
-              </article>
             </div>
 
             <div className="builder-notice" role="status">{siteBuildNotice}</div>
-            {cursorStatus && <div className="cursor-progress"><span className={cursorJob ? 'working' : 'done'} /> Cursor: {cursorStatus}</div>}
-            {cursorResult && <p className="cursor-result">{cursorResult}</p>}
-            {cursorPrUrl && <a className="cursor-agent-link" href={cursorPrUrl} target="_blank" rel="noreferrer">Revisar pull request opcional ↗</a>}
 
             {generatedSiteHtml && (
               <div className="site-preview-shell">
@@ -849,7 +1063,14 @@ export default function Home() {
             )}
           </section>
         </div>
-      </section>
+
+        <nav className="wizard-actions" aria-label="Navegação entre etapas">
+          <button type="button" className="wizard-back" onClick={prevStep} disabled={currentStep === 1}>← Voltar</button>
+          <span>Etapa {currentStep} de {totalSteps}</span>
+          <button type="button" className="wizard-next" onClick={() => void nextStep()} disabled={currentStep === totalSteps || generatingPrompt}>
+            {currentStep === totalSteps ? 'Fluxo concluído ✓' : generatingPrompt ? `${modelLabel(builderAiModel)} analisando...` : 'Avançar →'}
+          </button>
+        </nav>
     </main>
   );
 }
