@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build && vite build",
+    "build": "next build",
     "start": "next start",
     "test": "node --test tests/*.test.ts",
     "lint": "eslint app components tests next.config.ts vite.config.ts"
